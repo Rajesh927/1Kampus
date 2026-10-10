@@ -146,8 +146,24 @@ export function requireRole(allowedRoles: UserRole[]) {
       res.status(403).json({
         success: false,
         error: {
-          code: 'FORBIDDEN',
-          message: `Forbidden: This resource requires one of [${allowedRoles.join(', ')}] privileges. Your role: ${req.user.role}.`,
+          code: req.user.approval_status === 'pending' ? 'FORBIDDEN_PENDING_APPROVAL' : 'FORBIDDEN',
+          message: req.user.approval_status === 'pending'
+            ? 'Your organizer application is pending admin approval. You cannot access organizer features until approved by an administrator.'
+            : `Forbidden: This resource requires one of [${allowedRoles.join(', ')}] privileges. Your role: ${req.user.role}.`,
+        },
+      });
+      return;
+    }
+
+    // If organizer role is required and user has organizer role, ensure they are approved
+    if (req.user.role === 'organizer' && req.user.approval_status && req.user.approval_status !== 'approved') {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: req.user.approval_status === 'pending' ? 'FORBIDDEN_PENDING_APPROVAL' : 'FORBIDDEN',
+          message: req.user.approval_status === 'pending'
+            ? 'Your organizer application is pending admin approval. You cannot access organizer features until approved by an administrator.'
+            : `Forbidden: Organizer privileges have not been approved (Status: ${req.user.approval_status}).`,
         },
       });
       return;
@@ -156,3 +172,35 @@ export function requireRole(allowedRoles: UserRole[]) {
     next();
   };
 }
+
+/**
+ * Super Admin strict authorization middleware:
+ * Enforces that only the designated Super Admin (admin@srmist.edu.in) can execute sensitive administrative actions.
+ */
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required. Please sign in first.',
+      },
+    });
+    return;
+  }
+
+  const cleanEmail = req.user.email.trim().toLowerCase();
+  if (req.user.role !== 'admin' || cleanEmail !== 'admin@srmist.edu.in') {
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN_SUPER_ADMIN_REQUIRED',
+        message: 'Forbidden: Only the designated Super Admin (admin@srmist.edu.in) can perform this action.',
+      },
+    });
+    return;
+  }
+
+  next();
+}
+

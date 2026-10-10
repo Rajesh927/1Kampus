@@ -517,19 +517,30 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
           </form>
 
           {/* Toggle Login / Signup */}
-          <div className="text-center pt-2 border-t border-border dark:border-border-dark">
+          <div className="text-center pt-2 border-t border-border dark:border-border-dark space-y-2.5">
             <button
               onClick={() => {
                 setMode(mode === 'login' ? 'signup' : 'login');
                 setEmailError(null);
                 setRegError(null);
               }}
-              className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 underline cursor-pointer"
+              className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 underline cursor-pointer block w-full text-center"
             >
               {mode === 'login'
                 ? "Don't have an account? Sign up with 5 required student fields"
                 : 'Already have an account? Sign in'}
             </button>
+
+            {/* Dedicated Organizer Link */}
+            <div className="pt-1 border-t border-border/40 dark:border-border-dark/40">
+              <Link
+                to="/organizer/login"
+                id="organizer-auth-link"
+                className="text-xs text-ink-muted dark:text-ink-dark-muted hover:text-brand-600 dark:hover:text-brand-400 transition-colors inline-block text-center"
+              >
+                Are you an organizer? <span className="underline font-semibold text-brand-600 dark:text-brand-400">Login or create an organizer account.</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>

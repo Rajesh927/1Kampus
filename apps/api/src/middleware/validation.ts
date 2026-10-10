@@ -150,3 +150,25 @@ export const LoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const OrganizerApplicationSchema = z.object({
+  full_name: z.string().trim().min(2, 'Full name must be at least 2 characters').max(100),
+  email: z.string().trim().email('Valid official college email is required'),
+  employee_id: z.string().trim().min(3, 'College registration or employee ID must be at least 3 characters').max(40),
+  club_name: z.string().trim().min(2, 'Club or department name must be at least 2 characters').max(100),
+  position: z.string().trim().min(2, 'Position in the club or department is required').max(60),
+  password: z.string().min(6, 'Password must be at least 6 characters').max(128),
+  confirm_password: z.string().min(6, 'Confirm password must be at least 6 characters').max(128).optional(),
+  reason: z.string().trim().min(10, 'Reason must be at least 10 characters explaining why you need organizer access').max(1000),
+}).refine(
+  data => !data.confirm_password || data.password === data.confirm_password,
+  {
+    message: 'Passwords do not match',
+    path: ['confirm_password'],
+  }
+);
+
+export const OrganizerRejectionSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+

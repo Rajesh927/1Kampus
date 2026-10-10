@@ -32,6 +32,24 @@ export type RegistrationStatus = 'confirmed' | 'cancelled' | 'waitlist';
 
 export type AttendanceStatus = 'unmarked' | 'attended' | 'absent';
 
+export type OrganizerApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected' | 'suspended';
+
+export interface OrganizerApplication {
+  id: string;
+  user_id: string;
+  full_name: string;
+  email: string;
+  employee_id: string;
+  club_name: string;
+  position: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submitted_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  rejection_reason?: string;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -40,6 +58,9 @@ export interface UserProfile {
   avatar_url?: string;
   registration_number?: string;
   section?: string;
+  approval_status?: OrganizerApprovalStatus;
+  club_name?: string;
+  position?: string;
   created_at: string;
   updated_at: string;
 }
@@ -81,7 +102,7 @@ export interface NotificationItem {
   user_id: string;
   title: string;
   message: string;
-  type: 'event_cancelled' | 'info' | 'system' | 'registration' | 'event_announcement';
+  type: 'event_cancelled' | 'info' | 'system' | 'registration' | 'event_announcement' | 'organizer_application';
   read: boolean;
   event_id?: string;
   created_at: string;

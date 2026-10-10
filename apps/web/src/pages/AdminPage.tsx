@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.js';
 import { useToast } from '../context/ToastContext.js';
 import { api } from '../lib/api.js';
-import { EventItem, RegistrationItem, UserProfile } from '../types/index.js';
+import { EventItem, RegistrationItem, UserProfile, OrganizerApplication } from '../types/index.js';
 import { Badge } from '../components/ui/Badge.js';
 import { Button } from '../components/ui/Button.js';
 import { Modal } from '../components/ui/Modal.js';
@@ -30,6 +30,10 @@ import {
   Building2,
   Ticket,
   ShieldCheck,
+  FileText,
+  Clock,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
 
 export const AdminPage: React.FC = () => {
@@ -37,7 +41,22 @@ export const AdminPage: React.FC = () => {
   const { success, error, info } = useToast();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'students' | 'organizers' | 'overview'>('students');
+  const [activeTab, setActiveTab] = useState<'applications' | 'students' | 'organizers' | 'overview'>('applications');
+
+  // Organizer Applications State (Super Admin Workflow)
+  const [applications, setApplications] = useState<OrganizerApplication[]>([]);
+  const [pendingApplicationsCount, setPendingApplicationsCount] = useState<number>(0);
+  const [loadingApplications, setLoadingApplications] = useState<boolean>(false);
+  const [appStatusFilter, setAppStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [appSearchQuery, setAppSearchQuery] = useState('');
+  const [rejectingApp, setRejectingApp] = useState<OrganizerApplication | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+  const [submittingRejection, setSubmittingRejection] = useState(false);
+  const [approvingAppId, setApprovingAppId] = useState<string | null>(null);
+  const [revokingUserId, setRevokingUserId] = useState<string | null>(null);
+  const [revokeOrgName, setRevokeOrgName] = useState<string>('');
+  const [revokeReasonInput, setRevokeReasonInput] = useState('');
+  const [submittingRevoke, setSubmittingRevoke] = useState(false);
 
   // Super Admin Status State
   const [superAdminInfo, setSuperAdminInfo] = useState<{
@@ -132,21 +151,99 @@ export const AdminPage: React.FC = () => {
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [ovRes, evRes, orgRes, saRes] = await Promise.all([
+      const [ovRes, evRes, orgRes, saRes, appRes] = await Promise.all([
         api.getAdminOverview(),
         api.getEvents({ limit: 50, status: undefined }),
         api.getAdminOrganizers(),
         api.getSuperAdminStatus(),
+        api.getAdminOrganizerApplications('all'),
       ]);
 
       if (ovRes.success && ovRes.data) setOverview(ovRes.data);
       if (evRes.success && evRes.data) setEvents(evRes.data);
       if (orgRes.success && orgRes.data) setOrganizers(orgRes.data);
       if (saRes.success && saRes.data) setSuperAdminInfo(saRes.data);
+      if (appRes.success && appRes.data) {
+        setApplications(appRes.data);
+        const pending = appRes.data.filter(a => a.status === 'pending').length;
+        setPendingApplicationsCount(pending);
+      }
     } catch (err: any) {
       error('Admin Load Failed', err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadApplications = async () => {
+    setLoadingApplications(true);
+    try {
+      const res = await api.getAdminOrganizerApplications('all');
+      if (res.success && res.data) {
+        setApplications(res.data);
+        const pending = res.data.filter(a => a.status === 'pending').length;
+        setPendingApplicationsCount(pending);
+      }
+    } catch (err: any) {
+      console.warn('Failed to refresh applications:', err);
+    } finally {
+      setLoadingApplications(false);
+    }
+  };
+
+  const handleApproveApplication = async (app: OrganizerApplication) => {
+    setApprovingAppId(app.id);
+    try {
+      const res = await api.approveOrganizerApplication(app.id);
+      if (res.success) {
+        success('Application Approved', `Organizer privileges granted to ${app.full_name} (${app.club_name}).`);
+        loadApplications();
+        loadAdminData();
+      }
+    } catch (err: any) {
+      error('Approval Failed', err.message);
+    } finally {
+      setApprovingAppId(null);
+    }
+  };
+
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectingApp) return;
+    setSubmittingRejection(true);
+    try {
+      const res = await api.rejectOrganizerApplication(rejectingApp.id, rejectionReasonInput.trim());
+      if (res.success) {
+        success('Application Rejected', `Application for ${rejectingApp.full_name} was rejected.`);
+        setRejectingApp(null);
+        setRejectionReasonInput('');
+        loadApplications();
+        loadAdminData();
+      }
+    } catch (err: any) {
+      error('Rejection Failed', err.message);
+    } finally {
+      setSubmittingRejection(false);
+    }
+  };
+
+  const handleConfirmRevoke = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!revokingUserId) return;
+    setSubmittingRevoke(true);
+    try {
+      const res = await api.revokeOrganizerAccess(revokingUserId, revokeReasonInput.trim());
+      if (res.success) {
+        success('Privileges Revoked', `Organizer access suspended for ${revokeOrgName || 'account'}.`);
+        setRevokingUserId(null);
+        setRevokeReasonInput('');
+        loadAdminData();
+        loadApplications();
+      }
+    } catch (err: any) {
+      error('Revocation Failed', err.message);
+    } finally {
+      setSubmittingRevoke(false);
     }
   };
 
@@ -397,10 +494,35 @@ export const AdminPage: React.FC = () => {
           </div>
 
           {/* Tab Navigation */}
-          <div className="flex items-center gap-2 p-1.5 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-xs">
+          <div className="flex items-center gap-2 p-1.5 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-xs overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('applications')}
+              id="admin-tab-applications"
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 relative ${
+                activeTab === 'applications'
+                  ? 'bg-brand-600 text-white shadow-xs'
+                  : 'text-ink-muted dark:text-ink-dark-muted hover:text-ink dark:hover:text-ink-dark'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>Organizer Applications</span>
+              {pendingApplicationsCount > 0 ? (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white shadow-xs animate-pulse">
+                  {pendingApplicationsCount} Pending
+                </span>
+              ) : (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  activeTab === 'applications' ? 'bg-white/20 text-white' : 'bg-surface-subtle dark:bg-surface-dark-subtle text-ink'
+                }`}>
+                  {applications.length}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => setActiveTab('students')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              id="admin-tab-students"
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
                 activeTab === 'students'
                   ? 'bg-brand-600 text-white shadow-xs'
                   : 'text-ink-muted dark:text-ink-dark-muted hover:text-ink dark:hover:text-ink-dark'
@@ -457,6 +579,194 @@ export const AdminPage: React.FC = () => {
                 Other detected admin accounts: {superAdminInfo.conflicts.map(c => `${c.full_name} (${c.email})`).join(', ')}.
                 These accounts have been preserved safely without silent role demotion.
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 0: ORGANIZER APPLICATIONS (Super Admin Exclusively) */}
+        {/* ========================================================================= */}
+        {activeTab === 'applications' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header Telemetry & Filter Bar */}
+            <div className="bg-surface dark:bg-surface-dark rounded-3xl p-5 border border-border dark:border-border-dark shadow-card dark:shadow-card-dark flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted dark:text-ink-dark-muted" />
+                <input
+                  type="text"
+                  value={appSearchQuery}
+                  onChange={e => setAppSearchQuery(e.target.value)}
+                  placeholder="Search by applicant name, email, employee ID, club name..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark-subtle text-xs text-ink dark:text-ink-dark focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              {/* Status Filter Buttons */}
+              <div className="flex items-center gap-1.5 p-1 bg-surface-subtle dark:bg-surface-dark-subtle rounded-xl border border-border dark:border-border-dark overflow-x-auto">
+                {(['all', 'pending', 'approved', 'rejected'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setAppStatusFilter(tab)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer whitespace-nowrap ${
+                      appStatusFilter === tab
+                        ? 'bg-brand-600 text-white shadow-xs'
+                        : 'text-ink-muted dark:text-ink-dark-muted hover:text-ink'
+                    }`}
+                  >
+                    {tab === 'all' ? `All (${applications.length})` : tab === 'pending' ? `Pending (${pendingApplicationsCount})` : tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Applications Table */}
+            <div className="bg-surface dark:bg-surface-dark rounded-3xl border border-border dark:border-border-dark shadow-card dark:shadow-card-dark overflow-hidden">
+              <div className="p-5 border-b border-border/80 dark:border-border-dark/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-display font-bold text-lg text-ink dark:text-ink-dark flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+                    <span>Organizer Applications Review</span>
+                  </h3>
+                  <p className="text-xs text-ink-muted dark:text-ink-dark-muted mt-0.5">
+                    Official requests submitted for campus event publishing access. Enforced solely by SRMIST Super Admin.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {pendingApplicationsCount > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold animate-pulse">
+                      <Clock className="w-3.5 h-3.5" />
+                      {pendingApplicationsCount} Action Required
+                    </span>
+                  )}
+                  <Button variant="secondary" size="sm" onClick={loadApplications} loading={loadingApplications}>
+                    Refresh List
+                  </Button>
+                </div>
+              </div>
+
+              {applications.length === 0 ? (
+                <div className="py-16 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <h4 className="font-display font-bold text-base text-ink dark:text-ink-dark">No Applications Found</h4>
+                  <p className="text-xs text-ink-muted dark:text-ink-dark-muted max-w-sm mx-auto">
+                    No organizer applications have been received yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-border dark:border-border-dark text-ink-faint dark:text-ink-dark-muted font-bold uppercase tracking-wider bg-surface-subtle/40 dark:bg-surface-dark-subtle/40">
+                        <th className="py-3.5 px-5">Applicant Name & Email</th>
+                        <th className="py-3.5 px-4">Employee / Reg ID</th>
+                        <th className="py-3.5 px-4">Club / Department & Position</th>
+                        <th className="py-3.5 px-4 max-w-xs">Application Reason</th>
+                        <th className="py-3.5 px-4">Submitted Date</th>
+                        <th className="py-3.5 px-4">Status</th>
+                        <th className="py-3.5 px-5 text-right">Super Admin Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60 dark:divide-border-dark/60">
+                      {applications
+                        .filter(app => {
+                          if (appStatusFilter !== 'all' && app.status !== appStatusFilter) return false;
+                          if (appSearchQuery.trim()) {
+                            const q = appSearchQuery.toLowerCase();
+                            return (
+                              app.full_name.toLowerCase().includes(q) ||
+                              app.email.toLowerCase().includes(q) ||
+                              app.employee_id.toLowerCase().includes(q) ||
+                              app.club_name.toLowerCase().includes(q) ||
+                              app.position.toLowerCase().includes(q)
+                            );
+                          }
+                          return true;
+                        })
+                        .map(app => (
+                          <tr key={app.id} className="hover:bg-surface-subtle/80 dark:hover:bg-surface-dark-subtle/50 transition-colors">
+                            <td className="py-3.5 px-5">
+                              <span className="font-semibold text-ink dark:text-ink-dark block">{app.full_name}</span>
+                              <span className="text-ink-muted dark:text-ink-dark-muted font-mono text-[11px]">{app.email}</span>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono font-medium text-ink dark:text-ink-dark">
+                              {app.employee_id}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span className="font-semibold text-brand-600 dark:text-brand-400 block">{app.club_name}</span>
+                              <span className="text-ink-muted dark:text-ink-dark-muted text-[11px]">{app.position}</span>
+                            </td>
+                            <td className="py-3.5 px-4 max-w-xs">
+                              <p className="text-ink dark:text-ink-dark text-[11px] line-clamp-2 italic" title={app.reason}>
+                                "{app.reason}"
+                              </p>
+                            </td>
+                            <td className="py-3.5 px-4 text-ink-muted dark:text-ink-dark-muted text-[11px] whitespace-nowrap">
+                              {new Date(app.submitted_at).toLocaleDateString()}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {app.status === 'pending' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-bold">
+                                  <Clock className="w-3 h-3 animate-spin" />
+                                  PENDING
+                                </span>
+                              ) : app.status === 'approved' ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  APPROVED
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-[11px] font-bold">
+                                  <XCircle className="w-3 h-3" />
+                                  REJECTED
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                              {app.status === 'pending' ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
+                                    loading={approvingAppId === app.id}
+                                    icon={<UserCheck className="w-3.5 h-3.5" />}
+                                    onClick={() => handleApproveApplication(app)}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    icon={<UserX className="w-3.5 h-3.5" />}
+                                    onClick={() => {
+                                      setRejectingApp(app);
+                                      setRejectionReasonInput('');
+                                    }}
+                                    className="text-red-600 hover:text-red-700 border-red-200 dark:border-red-900/40"
+                                  >
+                                    Reject
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="text-right text-[11px] text-ink-muted dark:text-ink-dark-muted">
+                                  <span>Reviewed by {app.reviewed_by || 'Admin'}</span>
+                                  {app.reviewed_at && (
+                                    <span className="block text-[10px] text-ink-faint">
+                                      {new Date(app.reviewed_at).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -805,7 +1115,7 @@ export const AdminPage: React.FC = () => {
                               Active Organizer
                             </span>
                           </td>
-                          <td className="py-3.5 px-5 text-right">
+                          <td className="py-3.5 px-5 text-right whitespace-nowrap">
                             <Button
                               variant="secondary"
                               size="sm"
@@ -814,6 +1124,20 @@ export const AdminPage: React.FC = () => {
                               title="Edit club details and permissions"
                             >
                               Edit Club
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              icon={<UserX className="w-3.5 h-3.5" />}
+                              onClick={() => {
+                                setRevokingUserId(org.id);
+                                setRevokeOrgName(org.full_name);
+                                setRevokeReasonInput('');
+                              }}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 ml-2"
+                              title="Suspend or revoke organizer permissions"
+                            >
+                              Revoke
                             </Button>
                           </td>
                         </tr>
@@ -1390,6 +1714,113 @@ export const AdminPage: React.FC = () => {
               </div>
             )}
           </div>
+        )}
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: REJECT ORGANIZER APPLICATION */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={!!rejectingApp}
+        onClose={() => setRejectingApp(null)}
+        title="Reject Organizer Application"
+        description="Specify an optional explanation for rejecting this organizer application."
+        maxWidth="md"
+      >
+        {rejectingApp && (
+          <form onSubmit={handleConfirmReject} className="space-y-4">
+            <div className="p-3.5 bg-canvas dark:bg-canvas-dark rounded-2xl border border-border dark:border-border-dark space-y-1 text-xs">
+              <div>
+                <span className="text-ink-muted dark:text-ink-dark-muted">Applicant: </span>
+                <span className="font-bold text-ink dark:text-ink-dark">{rejectingApp.full_name}</span>
+              </div>
+              <div>
+                <span className="text-ink-muted dark:text-ink-dark-muted">Club/Department: </span>
+                <span className="font-bold text-ink dark:text-ink-dark">{rejectingApp.club_name} ({rejectingApp.position})</span>
+              </div>
+              <div>
+                <span className="text-ink-muted dark:text-ink-dark-muted">Email: </span>
+                <span className="font-mono text-ink dark:text-ink-dark">{rejectingApp.email}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-ink-dark-muted mb-1">
+                Reason for Rejection (Optional)
+              </label>
+              <textarea
+                rows={3}
+                value={rejectionReasonInput}
+                onChange={e => setRejectionReasonInput(e.target.value)}
+                placeholder="e.g. Club leadership already registered or insufficient department verification..."
+                className="w-full px-4 py-2.5 rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark-subtle text-xs text-ink dark:text-ink-dark focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border dark:border-border-dark">
+              <Button variant="secondary" size="sm" type="button" onClick={() => setRejectingApp(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                loading={submittingRejection}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                Confirm Rejection
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL 6: SUSPEND / REVOKE ORGANIZER PRIVILEGES */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={!!revokingUserId}
+        onClose={() => setRevokingUserId(null)}
+        title="Revoke Organizer Privileges"
+        description="Suspend organizer permissions and revert account to student access."
+        maxWidth="md"
+      >
+        {revokingUserId && (
+          <form onSubmit={handleConfirmRevoke} className="space-y-4">
+            <div className="p-3.5 bg-amber-500/10 rounded-2xl border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300">
+              <p>
+                Suspending <strong>{revokeOrgName || 'this organizer'}</strong> will revoke their access to create or publish events immediately.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-ink-dark-muted mb-1">
+                Reason for Revocation (Optional)
+              </label>
+              <textarea
+                rows={3}
+                value={revokeReasonInput}
+                onChange={e => setRevokeReasonInput(e.target.value)}
+                placeholder="e.g. Club tenure ended, policy violation, or leadership transition..."
+                className="w-full px-4 py-2.5 rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark-subtle text-xs text-ink dark:text-ink-dark focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border dark:border-border-dark">
+              <Button variant="secondary" size="sm" type="button" onClick={() => setRevokingUserId(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                loading={submittingRevoke}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                Confirm Revoke
+              </Button>
+            </div>
+          </form>
         )}
       </Modal>
     </div>

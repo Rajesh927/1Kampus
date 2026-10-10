@@ -1,4 +1,4 @@
-import { ApiResponse, EventItem, RegistrationItem, UserProfile, NotificationItem, ApprovedOrganization, OrganizerOverview } from '../types/index.js';
+import { ApiResponse, EventItem, RegistrationItem, UserProfile, NotificationItem, ApprovedOrganization, OrganizerOverview, OrganizerApplication } from '../types/index.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
@@ -394,6 +394,54 @@ class ApiClient {
 
   public async getAdminEventAttendees(eventId: string) {
     return this.request<Array<RegistrationItem & { student: UserProfile }>>(`/admin/events/${eventId}/attendees`);
+  }
+
+  // --------------------------------------------------------------------------
+  // ORGANIZER APPLICATIONS WORKFLOW
+  // --------------------------------------------------------------------------
+  public async applyOrganizer(data: {
+    full_name: string;
+    email: string;
+    employee_id: string;
+    club_name: string;
+    position: string;
+    reason: string;
+    password: string;
+    confirm_password?: string;
+  }) {
+    return this.request<{ application: OrganizerApplication; user: UserProfile; token: string }>('/organizer/apply', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public async getOrganizerApplicationStatus() {
+    return this.request<{ status: string; application: OrganizerApplication | null; user: UserProfile }>('/organizer/application-status');
+  }
+
+  public async getAdminOrganizerApplications(status?: string) {
+    const query = status && status !== 'all' ? `?status=${status}` : '';
+    return this.request<OrganizerApplication[]>(`/admin/organizer-applications${query}`);
+  }
+
+  public async approveOrganizerApplication(id: string) {
+    return this.request<{ application: OrganizerApplication; user: UserProfile }>(`/admin/organizer-applications/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  public async rejectOrganizerApplication(id: string, reason?: string) {
+    return this.request<{ application: OrganizerApplication; user: UserProfile }>(`/admin/organizer-applications/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  public async revokeOrganizerAccess(id: string, reason?: string) {
+    return this.request<UserProfile>(`/admin/organizers/${id}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
   }
 }
 

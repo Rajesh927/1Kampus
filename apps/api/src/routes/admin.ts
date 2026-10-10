@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../services/store.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
-import { validateRequest, AdminStudentUpdateSchema, AdminOrganizerUpdateSchema } from '../middleware/validation.js';
+import { requireAuth, requireRole, requireSuperAdmin } from '../middleware/auth.js';
+import { validateRequest, AdminStudentUpdateSchema, AdminOrganizerUpdateSchema, OrganizerRejectionSchema } from '../middleware/validation.js';
 
 const router = Router();
 
@@ -325,6 +325,99 @@ router.get('/admin/events/:id/attendees', requireAuth, requireRole(['admin']), a
       success: false,
       error: {
         code: isNotFound ? 'EVENT_NOT_FOUND' : 'QUERY_FAILED',
+        message: err.message.replace(/^[A-Z_]+:\s*/, ''),
+      },
+    });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// ORGANIZER APPLICATIONS (Super Admin Exclusively)
+// ----------------------------------------------------------------------------
+
+// GET /api/v1/admin/organizer-applications - List organizer applications with pending count
+router.get('/admin/organizer-applications', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const { status } = req.query as { status?: string };
+  const applications = await db.listOrganizerApplications(status || undefined);
+  const pendingCount = applications.filter(a => a.status === 'pending').length;
+
+  res.status(200).json({
+    success: true,
+    data: applications,
+    total: applications.length,
+    pending_count: pendingCount,
+  });
+});
+
+// POST /api/v1/admin/organizer-applications/:id/approve - Super Admin approves application
+router.post('/admin/organizer-applications/:id/approve', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    const result = await db.approveOrganizerApplication(id, req.user!.email);
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: `Organizer application for ${result.application.full_name} has been approved.`,
+    });
+  } catch (err: any) {
+    const isNotFound = err.message && err.message.includes('APPLICATION_NOT_FOUND');
+    const isForbidden = err.message && (err.message.includes('FORBIDDEN_SUPER_ADMIN_REQUIRED') || err.message.includes('CANNOT_APPROVE_SELF'));
+    res.status(isNotFound ? 404 : isForbidden ? 403 : 400).json({
+      success: false,
+      error: {
+        code: isNotFound ? 'APPLICATION_NOT_FOUND' : isForbidden ? 'FORBIDDEN' : 'APPROVAL_FAILED',
+        message: err.message.replace(/^[A-Z_]+:\s*/, ''),
+      },
+    });
+  }
+});
+
+// POST /api/v1/admin/organizer-applications/:id/reject - Super Admin rejects application
+router.post(
+  '/admin/organizer-applications/:id/reject',
+  requireAuth,
+  requireSuperAdmin,
+  validateRequest({ body: OrganizerRejectionSchema }),
+  async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    try {
+      const result = await db.rejectOrganizerApplication(id, req.user!.email, req.body?.reason);
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: `Organizer application for ${result.application.full_name} has been rejected.`,
+      });
+    } catch (err: any) {
+      const isNotFound = err.message && err.message.includes('APPLICATION_NOT_FOUND');
+      const isForbidden = err.message && (err.message.includes('FORBIDDEN_SUPER_ADMIN_REQUIRED') || err.message.includes('CANNOT_REJECT_SELF'));
+      res.status(isNotFound ? 404 : isForbidden ? 403 : 400).json({
+        success: false,
+        error: {
+          code: isNotFound ? 'APPLICATION_NOT_FOUND' : isForbidden ? 'FORBIDDEN' : 'REJECTION_FAILED',
+          message: err.message.replace(/^[A-Z_]+:\s*/, ''),
+        },
+      });
+    }
+  }
+);
+
+// POST /api/v1/admin/organizers/:id/revoke - Super Admin suspends or revokes organizer access
+router.post('/admin/organizers/:id/revoke', requireAuth, requireSuperAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    const updated = await db.revokeOrganizerAccess(id, req.user!.email, req.body?.reason);
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: `Organizer privileges revoked for ${updated.full_name}.`,
+    });
+  } catch (err: any) {
+    const isNotFound = err.message && err.message.includes('USER_NOT_FOUND');
+    const isForbidden = err.message && err.message.includes('FORBIDDEN');
+    res.status(isNotFound ? 404 : isForbidden ? 403 : 400).json({
+      success: false,
+      error: {
+        code: isNotFound ? 'USER_NOT_FOUND' : isForbidden ? 'FORBIDDEN' : 'REVOCATION_FAILED',
         message: err.message.replace(/^[A-Z_]+:\s*/, ''),
       },
     });

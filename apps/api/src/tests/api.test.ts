@@ -1270,4 +1270,326 @@ describe('1Kampus Backend API Tests', () => {
       expect(res.body.data.service).toBe('1Kampus API');
     });
   });
+
+  // ==========================================================================
+  // ORGANIZER REGISTRATION & APPROVAL WORKFLOW TESTS
+  // ==========================================================================
+  describe('Organizer Registration & Approval Workflow (Super Admin RBAC)', () => {
+    const testApplicant = {
+      full_name: 'Aditya Rao',
+      email: 'aditya.rao@srmist.edu.in',
+      employee_id: 'ORG-EMP-9901',
+      club_name: 'SRM Developer Student Club',
+      position: 'Technical Lead',
+      password: 'StrongOrganizerPass2026!',
+      confirm_password: 'StrongOrganizerPass2026!',
+      reason: 'We require organizer access to host developer hackathons and workshops for campus students.',
+    };
+
+    let createdApplicationId: string;
+    let applicantToken: string;
+
+    it('1. Successfully submits organizer application with PENDING status (POST /api/v1/organizer/apply)', async () => {
+      const res = await request(app)
+        .post('/api/v1/organizer/apply')
+        .send(testApplicant);
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toBe('Your organizer application is pending admin approval.');
+      expect(res.body.data.application.status).toBe('pending');
+      expect(res.body.data.application.club_name).toBe(testApplicant.club_name);
+      expect(res.body.data.application.employee_id).toBe(testApplicant.employee_id);
+      expect(res.body.data.user.approval_status).toBe('pending');
+      expect(res.body.data.token).toBeDefined();
+
+      createdApplicationId = res.body.data.application.id;
+      applicantToken = res.body.data.token;
+    });
+
+    it('2. Prevents duplicate application submission for the same email or ID (409 Conflict)', async () => {
+      const res = await request(app)
+        .post('/api/v1/organizer/apply')
+        .send(testApplicant);
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('DUPLICATE_APPLICATION');
+    });
+
+    it('3. Pending applicant can check application review status (GET /api/v1/organizer/application-status)', async () => {
+      const res = await request(app)
+        .get('/api/v1/organizer/application-status')
+        .set('Authorization', `Bearer ${applicantToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('pending');
+      expect(res.body.data.application.id).toBe(createdApplicationId);
+    });
+
+    it('4. Pending applicant is denied event creation (403 FORBIDDEN)', async () => {
+      const res = await request(app)
+        .post('/api/v1/events')
+        .set('Authorization', `Bearer ${applicantToken}`)
+        .send({
+          title: 'Unauthorized Hackathon by Pending Organizer',
+          event_type: 'hackathon',
+          category: 'Hackathons',
+          organization: 'SRM Developer Student Club',
+          capacity: 100,
+          venue: 'Tech Park Mini Hall',
+          start_time: new Date(Date.now() + 5 * 86400000).toISOString(),
+          end_time: new Date(Date.now() + 6 * 86400000).toISOString(),
+          registration_deadline: new Date(Date.now() + 4 * 86400000).toISOString(),
+          banner_url: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80',
+          description: 'A test event created by a pending applicant that should be rejected.',
+          instructions: 'Bring your laptop.',
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toMatch(/FORBIDDEN/);
+    });
+
+    it('5. Super Admin overview reports pending organizer applications count and creates in-app notification', async () => {
+      const adminLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!',
+        });
+      const superAdminToken = adminLogin.body.data.token;
+
+      const ovRes = await request(app)
+        .get('/api/v1/admin/overview')
+        .set('Authorization', `Bearer ${superAdminToken}`);
+
+      expect(ovRes.status).toBe(200);
+      expect(ovRes.body.data.pending_applications_count).toBeGreaterThanOrEqual(1);
+
+      const notifRes = await request(app)
+        .get('/api/v1/me/notifications')
+        .set('Authorization', `Bearer ${superAdminToken}`);
+
+      expect(notifRes.status).toBe(200);
+      const appNotif = notifRes.body.data.find((n: any) => n.type === 'organizer_application');
+      expect(appNotif).toBeDefined();
+      expect(appNotif.message).toContain(testApplicant.full_name);
+    });
+
+    it('6. Super Admin lists all organizer applications (GET /api/v1/admin/organizer-applications)', async () => {
+      const adminLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!',
+        });
+      const superAdminToken = adminLogin.body.data.token;
+
+      const res = await request(app)
+        .get('/api/v1/admin/organizer-applications')
+        .set('Authorization', `Bearer ${superAdminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.pending_count).toBeGreaterThanOrEqual(1);
+      const found = res.body.data.find((a: any) => a.id === createdApplicationId);
+      expect(found).toBeDefined();
+      expect(found.full_name).toBe(testApplicant.full_name);
+    });
+
+    it('7. Non-admin cannot approve applications (403 Forbidden)', async () => {
+      const orgLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'acm@srmist.edu.in',
+          password: 'Organizer@1Kampus2026!',
+        });
+      const orgToken = orgLogin.body.data.token;
+
+      const res = await request(app)
+        .post(`/api/v1/admin/organizer-applications/${createdApplicationId}/approve`)
+        .set('Authorization', `Bearer ${orgToken}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toMatch(/FORBIDDEN/);
+    });
+
+    it('8. Super Admin approves organizer application (POST /api/v1/admin/organizer-applications/:id/approve)', async () => {
+      const adminLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!',
+        });
+      const superAdminToken = adminLogin.body.data.token;
+
+      const res = await request(app)
+        .post(`/api/v1/admin/organizer-applications/${createdApplicationId}/approve`)
+        .set('Authorization', `Bearer ${superAdminToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.application.status).toBe('approved');
+      expect(res.body.data.application.reviewed_by).toBe('admin@srmist.edu.in');
+      expect(res.body.data.user.role).toBe('organizer');
+      expect(res.body.data.user.approval_status).toBe('approved');
+    });
+
+    it('9. Newly approved organizer can now create and publish events', async () => {
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: testApplicant.email,
+          password: testApplicant.password,
+        });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.data.user.role).toBe('organizer');
+      expect(loginRes.body.data.user.approval_status).toBe('approved');
+      const approvedToken = loginRes.body.data.token;
+
+      const createRes = await request(app)
+        .post('/api/v1/events')
+        .set('Authorization', `Bearer ${approvedToken}`)
+        .send({
+          title: 'SRM Developer Club Flagship Sprint 2026',
+          event_type: 'hackathon',
+          category: 'Hackathons',
+          organization: testApplicant.club_name,
+          capacity: 80,
+          venue: 'TP Ganesan Hall 2',
+          start_time: new Date(Date.now() + 5 * 86400000).toISOString(),
+          end_time: new Date(Date.now() + 6 * 86400000).toISOString(),
+          registration_deadline: new Date(Date.now() + 4 * 86400000).toISOString(),
+          banner_url: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80',
+          description: 'Official flagship hackathon hosted by approved organizer.',
+          instructions: 'Bring student ID card and laptops.',
+        });
+
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.success).toBe(true);
+      expect(createRes.body.data.title).toBe('SRM Developer Club Flagship Sprint 2026');
+    });
+
+    it('10. Super Admin can revoke organizer access later and applicant is again denied event creation', async () => {
+      const adminLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!',
+        });
+      const superAdminToken = adminLogin.body.data.token;
+
+      const profile = await db.getProfileByEmail(testApplicant.email);
+      expect(profile).toBeDefined();
+
+      const revokeRes = await request(app)
+        .post(`/api/v1/admin/organizers/${profile!.id}/revoke`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .send({ reason: 'Club convenor tenure concluded.' });
+
+      expect(revokeRes.status).toBe(200);
+      expect(revokeRes.body.success).toBe(true);
+      expect(revokeRes.body.data.role).toBe('student');
+      expect(revokeRes.body.data.approval_status).toBe('suspended');
+
+      const loginAgain = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: testApplicant.email,
+          password: testApplicant.password,
+        });
+      const revokedToken = loginAgain.body.data.token;
+
+      const createRes = await request(app)
+        .post('/api/v1/events')
+        .set('Authorization', `Bearer ${revokedToken}`)
+        .send({
+          title: 'Denied Post-Revocation Event',
+          event_type: 'workshop',
+          category: 'Workshops',
+          organization: testApplicant.club_name,
+          capacity: 40,
+          venue: 'UB 301',
+          start_time: new Date(Date.now() + 5 * 86400000).toISOString(),
+          end_time: new Date(Date.now() + 6 * 86400000).toISOString(),
+          registration_deadline: new Date(Date.now() + 4 * 86400000).toISOString(),
+          banner_url: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=1200&q=80',
+          description: 'Should be denied because permissions were suspended.',
+          instructions: 'Bring your laptop.',
+        });
+
+      expect(createRes.status).toBe(403);
+      expect(createRes.body.success).toBe(false);
+    });
+
+    it('11. Rejection workflow: Submits second application and Super Admin rejects with reason', async () => {
+      const secondApplicant = {
+        full_name: 'Varun K',
+        email: 'varun.k@srmist.edu.in',
+        employee_id: 'ORG-EMP-9902',
+        club_name: 'Gaming Club',
+        position: 'Coordinator',
+        password: 'StrongOrganizerPass2026!',
+        confirm_password: 'StrongOrganizerPass2026!',
+        reason: 'We want to organize esports tournament.',
+      };
+
+      const applyRes = await request(app)
+        .post('/api/v1/organizer/apply')
+        .send(secondApplicant);
+
+      expect(applyRes.status).toBe(201);
+      const secondAppId = applyRes.body.data.application.id;
+
+      const adminLogin = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!',
+        });
+      const superAdminToken = adminLogin.body.data.token;
+
+      const rejectRes = await request(app)
+        .post(`/api/v1/admin/organizer-applications/${secondAppId}/reject`)
+        .set('Authorization', `Bearer ${superAdminToken}`)
+        .send({ reason: 'Club is not recognized in current academic semester.' });
+
+      expect(rejectRes.status).toBe(200);
+      expect(rejectRes.body.success).toBe(true);
+      expect(rejectRes.body.data.application.status).toBe('rejected');
+      expect(rejectRes.body.data.application.rejection_reason).toBe('Club is not recognized in current academic semester.');
+      expect(rejectRes.body.data.user.approval_status).toBe('rejected');
+    });
+
+    it('12. Student registration and event ticket registration continue to function flawlessly', async () => {
+      const newStudentEmail = `student.test.${Date.now()}@student.srmist.edu.in`;
+      const signupRes = await request(app)
+        .post('/api/v1/auth/signup')
+        .send({
+          full_name: 'Workflow Verification Student',
+          registration_number: `RA${Date.now().toString().slice(-10)}`,
+          email: newStudentEmail,
+          section: 'CSE-A',
+          password: 'StudentPass123!',
+        });
+
+      expect(signupRes.status).toBe(201);
+      expect(signupRes.body.success).toBe(true);
+      const studentToken = signupRes.body.data.token;
+
+      const regRes = await request(app)
+        .post('/api/v1/events/10000000-0000-0000-0000-000000000001/register')
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(regRes.status).toBe(201);
+      expect(regRes.body.success).toBe(true);
+      expect(regRes.body.data.registration_status).toBe('confirmed');
+      expect(regRes.body.data.ticket_code).toBeDefined();
+    });
+  });
 });

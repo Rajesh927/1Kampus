@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import { env } from '../config/env.js';
-import { EventItem, RegistrationItem, UserProfile, EventCategory, EventStatus, NotificationItem, UserRole, EventType, ApprovedOrganization, OrganizerOverview } from '../types/index.js';
+import { EventItem, RegistrationItem, UserProfile, EventCategory, EventStatus, NotificationItem, UserRole, EventType, ApprovedOrganization, OrganizerOverview, OrganizerApplication, OrganizerApprovalStatus } from '../types/index.js';
 import { APPROVED_ORGANIZATIONS } from '../config/organizations.js';
 
 // ----------------------------------------------------------------------------
@@ -72,6 +72,7 @@ const INITIAL_PROFILES: UserProfile[] = [
     role: 'admin',
     registration_number: 'ADM-SRMIST-001',
     section: 'Administration',
+    approval_status: 'approved',
     avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -83,6 +84,9 @@ const INITIAL_PROFILES: UserProfile[] = [
     role: 'organizer',
     registration_number: 'ORG-ACM-001',
     section: 'Faculty Advisor / CSE',
+    approval_status: 'approved',
+    club_name: 'ACM Student Chapter',
+    position: 'Faculty Advisor / Chapter Lead',
     avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 25 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -94,6 +98,9 @@ const INITIAL_PROFILES: UserProfile[] = [
     role: 'organizer',
     registration_number: 'ORG-ROBO-002',
     section: 'Student Affairs',
+    approval_status: 'approved',
+    club_name: 'Robotics/IoT Club',
+    position: 'Club President',
     avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -105,6 +112,9 @@ const INITIAL_PROFILES: UserProfile[] = [
     role: 'organizer',
     registration_number: 'ORG-ECELL-003',
     section: 'Management Studies',
+    approval_status: 'approved',
+    club_name: 'Entrepreneurship/E-Cell',
+    position: 'Student Convenor',
     avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -116,6 +126,9 @@ const INITIAL_PROFILES: UserProfile[] = [
     role: 'organizer',
     registration_number: 'ORG-MILAN-004',
     section: 'Cultural Committee',
+    approval_status: 'approved',
+    club_name: 'Cultural Club',
+    position: 'Cultural Secretary',
     avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -442,6 +455,7 @@ class DatabaseStore {
   private events: Map<string, EventItem> = new Map();
   private registrations: Map<string, RegistrationItem> = new Map();
   private notifications: Map<string, NotificationItem> = new Map();
+  private applications: Map<string, OrganizerApplication> = new Map();
   private credentials: Map<string, { email: string; passwordHash: string; salt: string; mustChangePassword?: boolean }> = new Map();
   private supabase: SupabaseClient | null = null;
   // Mutex lock for atomic registration concurrency
@@ -1614,7 +1628,7 @@ class DatabaseStore {
     user_id: string;
     title: string;
     message: string;
-    type?: 'event_cancelled' | 'info' | 'system' | 'registration';
+    type?: NotificationItem['type'];
     event_id?: string;
   }): Promise<NotificationItem> {
     const id = crypto.randomUUID();
@@ -1931,6 +1945,8 @@ class DatabaseStore {
     active_events: number;
     category_distribution: Record<string, number>;
     users_by_role: Record<string, number>;
+    pending_applications_count: number;
+    total_applications_count: number;
   }> {
     const users = Array.from(this.profiles.values());
     const events = Array.from(this.events.values()).filter(e => !e.deleted_at);
@@ -1946,6 +1962,9 @@ class DatabaseStore {
       users_by_role[u.role] = (users_by_role[u.role] || 0) + 1;
     });
 
+    const pending_applications_count = Array.from(this.applications.values()).filter(a => a.status === 'pending').length;
+    const total_applications_count = this.applications.size;
+
     return {
       total_users: users.length,
       total_events: events.length,
@@ -1953,7 +1972,398 @@ class DatabaseStore {
       active_events: events.filter(e => e.status === 'published' && e.end_time >= new Date().toISOString()).length,
       category_distribution,
       users_by_role,
+      pending_applications_count,
+      total_applications_count,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // ORGANIZER APPLICATIONS WORKFLOW (SUPER ADMIN RBAC)
+  // --------------------------------------------------------------------------
+  public async submitOrganizerApplication(data: {
+    user_id?: string;
+    full_name: string;
+    email: string;
+    employee_id: string;
+    club_name: string;
+    position: string;
+    reason: string;
+    password?: string;
+  }): Promise<{ application: OrganizerApplication; user: UserProfile; token: string }> {
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanEmpId = data.employee_id.trim();
+
+    // Check duplicate applications (pending with same email or employee ID)
+    for (const app of this.applications.values()) {
+      if (app.status === 'pending') {
+        if (app.email.toLowerCase() === cleanEmail) {
+          throw new Error('DUPLICATE_APPLICATION: An organizer application with this email is already pending admin review.');
+        }
+        if (app.employee_id.toLowerCase() === cleanEmpId.toLowerCase()) {
+          throw new Error('DUPLICATE_APPLICATION: An organizer application with this employee/registration ID is already pending admin review.');
+        }
+      }
+    }
+
+    // Check existing profile
+    let user = await this.getProfileByEmail(cleanEmail);
+    if (user && user.role === 'organizer' && user.approval_status === 'approved') {
+      throw new Error('ALREADY_APPROVED: This account is already an approved organizer.');
+    }
+    if (user && user.role === 'admin') {
+      throw new Error('INVALID_ACCOUNT: Administrator accounts cannot submit organizer applications.');
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (!user) {
+      if (!data.password) {
+        throw new Error('PASSWORD_REQUIRED: Password is required for new organizer registrations.');
+      }
+      const userId = data.user_id || crypto.randomUUID();
+      user = {
+        id: userId,
+        email: cleanEmail,
+        full_name: data.full_name.trim(),
+        role: 'student', // Retains student privileges until explicitly approved by Super Admin
+        registration_number: cleanEmpId,
+        section: data.club_name.trim(),
+        approval_status: 'pending',
+        club_name: data.club_name.trim(),
+        position: data.position.trim(),
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+      this.profiles.set(user.id, user);
+      this.setCredentials(cleanEmail, data.password);
+    } else {
+      // Existing user applying for organizer role
+      user = {
+        ...user,
+        full_name: data.full_name.trim(),
+        registration_number: cleanEmpId,
+        approval_status: 'pending',
+        club_name: data.club_name.trim(),
+        position: data.position.trim(),
+        updated_at: nowIso,
+      };
+      this.profiles.set(user.id, user);
+      if (data.password) {
+        this.setCredentials(cleanEmail, data.password);
+      }
+    }
+
+    const appId = crypto.randomUUID();
+    const application: OrganizerApplication = {
+      id: appId,
+      user_id: user.id,
+      full_name: data.full_name.trim(),
+      email: cleanEmail,
+      employee_id: cleanEmpId,
+      club_name: data.club_name.trim(),
+      position: data.position.trim(),
+      reason: data.reason.trim(),
+      status: 'pending',
+      submitted_at: nowIso,
+    };
+
+    this.applications.set(appId, application);
+
+    // Notify Super Admin (admin@srmist.edu.in)
+    const adminUser = Array.from(this.profiles.values()).find(p => p.role === 'admin' && p.email.toLowerCase() === 'admin@srmist.edu.in');
+    if (adminUser) {
+      await this.addNotification({
+        user_id: adminUser.id,
+        title: 'New Organizer Application',
+        message: `${data.full_name} (${data.club_name} - ${data.position}) submitted an organizer application.`,
+        type: 'organizer_application',
+      });
+    }
+
+    // Sync to Supabase if connected
+    if (this.supabase) {
+      try {
+        await this.supabase.from('profiles').upsert({
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role: user.role,
+          registration_number: user.registration_number,
+          section: user.section,
+          approval_status: user.approval_status,
+          club_name: user.club_name,
+          position: user.position,
+          updated_at: user.updated_at,
+        });
+
+        await this.supabase.from('organizer_applications').insert({
+          id: application.id,
+          user_id: application.user_id,
+          full_name: application.full_name,
+          email: application.email,
+          employee_id: application.employee_id,
+          club_name: application.club_name,
+          position: application.position,
+          reason: application.reason,
+          status: application.status,
+          submitted_at: application.submitted_at,
+        });
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase organizer application insert fallback:', err);
+      }
+    }
+
+    const token = this.generateSessionToken(user);
+    return { application, user, token };
+  }
+
+  public async listOrganizerApplications(statusFilter?: string): Promise<OrganizerApplication[]> {
+    if (this.supabase) {
+      try {
+        let query = this.supabase.from('organizer_applications').select('*').order('submitted_at', { ascending: false });
+        if (statusFilter && statusFilter !== 'all') {
+          query = query.eq('status', statusFilter);
+        }
+        const { data, error } = await query;
+        if (!error && data) {
+          data.forEach((app: OrganizerApplication) => this.applications.set(app.id, app));
+          return data;
+        }
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase listOrganizerApplications fallback:', err);
+      }
+    }
+
+    const apps = Array.from(this.applications.values());
+    const filtered = (statusFilter && statusFilter !== 'all')
+      ? apps.filter(a => a.status === statusFilter)
+      : apps;
+    return filtered.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  }
+
+  public async getOrganizerApplicationById(id: string): Promise<OrganizerApplication | null> {
+    const local = this.applications.get(id);
+    if (local) return { ...local };
+
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase.from('organizer_applications').select('*').eq('id', id).single();
+        if (!error && data) {
+          this.applications.set(data.id, data);
+          return data;
+        }
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase getOrganizerApplicationById fallback:', err);
+      }
+    }
+    return null;
+  }
+
+  public async getOrganizerApplicationByUserId(userId: string): Promise<OrganizerApplication | null> {
+    for (const app of this.applications.values()) {
+      if (app.user_id === userId) {
+        return { ...app };
+      }
+    }
+
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase
+          .from('organizer_applications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('submitted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!error && data) {
+          this.applications.set(data.id, data);
+          return data;
+        }
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase getOrganizerApplicationByUserId fallback:', err);
+      }
+    }
+    return null;
+  }
+
+  public async approveOrganizerApplication(
+    applicationId: string,
+    reviewedByAdminEmail: string
+  ): Promise<{ application: OrganizerApplication; user: UserProfile }> {
+    const cleanAdmin = reviewedByAdminEmail.trim().toLowerCase();
+    if (cleanAdmin !== 'admin@srmist.edu.in') {
+      throw new Error('FORBIDDEN_SUPER_ADMIN_REQUIRED: Only the designated Super Admin (admin@srmist.edu.in) can approve organizer applications.');
+    }
+
+    const app = this.applications.get(applicationId);
+    if (!app) {
+      throw new Error('APPLICATION_NOT_FOUND: The organizer application does not exist.');
+    }
+
+    if (app.email.toLowerCase() === cleanAdmin) {
+      throw new Error('CANNOT_APPROVE_SELF: Administrators cannot approve their own organizer applications.');
+    }
+
+    const nowIso = new Date().toISOString();
+    app.status = 'approved';
+    app.reviewed_at = nowIso;
+    app.reviewed_by = cleanAdmin;
+    this.applications.set(applicationId, app);
+
+    const user = this.profiles.get(app.user_id);
+    if (!user) {
+      throw new Error('USER_NOT_FOUND: Applicant profile not found.');
+    }
+
+    user.role = 'organizer';
+    user.approval_status = 'approved';
+    user.club_name = app.club_name;
+    user.position = app.position;
+    user.updated_at = nowIso;
+    this.profiles.set(user.id, user);
+
+    // Notify applicant
+    await this.addNotification({
+      user_id: user.id,
+      title: 'Organizer Application Approved',
+      message: `Congratulations! Your organizer application for ${app.club_name} (${app.position}) has been approved by ${cleanAdmin}. You can now create and manage events.`,
+      type: 'info',
+    });
+
+    if (this.supabase) {
+      try {
+        await this.supabase.from('organizer_applications').update({
+          status: 'approved',
+          reviewed_at: nowIso,
+          reviewed_by: cleanAdmin,
+        }).eq('id', applicationId);
+
+        await this.supabase.from('profiles').update({
+          role: 'organizer',
+          approval_status: 'approved',
+          club_name: user.club_name,
+          position: user.position,
+          updated_at: nowIso,
+        }).eq('id', user.id);
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase approveOrganizerApplication fallback:', err);
+      }
+    }
+
+    return { application: { ...app }, user: { ...user } };
+  }
+
+  public async rejectOrganizerApplication(
+    applicationId: string,
+    reviewedByAdminEmail: string,
+    rejectionReason?: string
+  ): Promise<{ application: OrganizerApplication; user: UserProfile }> {
+    const cleanAdmin = reviewedByAdminEmail.trim().toLowerCase();
+    if (cleanAdmin !== 'admin@srmist.edu.in') {
+      throw new Error('FORBIDDEN_SUPER_ADMIN_REQUIRED: Only the designated Super Admin (admin@srmist.edu.in) can reject organizer applications.');
+    }
+
+    const app = this.applications.get(applicationId);
+    if (!app) {
+      throw new Error('APPLICATION_NOT_FOUND: The organizer application does not exist.');
+    }
+
+    if (app.email.toLowerCase() === cleanAdmin) {
+      throw new Error('CANNOT_REJECT_SELF: Administrators cannot review their own accounts.');
+    }
+
+    const nowIso = new Date().toISOString();
+    app.status = 'rejected';
+    app.reviewed_at = nowIso;
+    app.reviewed_by = cleanAdmin;
+    app.rejection_reason = rejectionReason?.trim() || undefined;
+    this.applications.set(applicationId, app);
+
+    const user = this.profiles.get(app.user_id);
+    if (!user) {
+      throw new Error('USER_NOT_FOUND: Applicant profile not found.');
+    }
+
+    user.role = 'student';
+    user.approval_status = 'rejected';
+    user.updated_at = nowIso;
+    this.profiles.set(user.id, user);
+
+    // Notify applicant
+    await this.addNotification({
+      user_id: user.id,
+      title: 'Organizer Application Update',
+      message: `Your organizer application for ${app.club_name} was not approved.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`,
+      type: 'info',
+    });
+
+    if (this.supabase) {
+      try {
+        await this.supabase.from('organizer_applications').update({
+          status: 'rejected',
+          reviewed_at: nowIso,
+          reviewed_by: cleanAdmin,
+          rejection_reason: app.rejection_reason,
+        }).eq('id', applicationId);
+
+        await this.supabase.from('profiles').update({
+          role: 'student',
+          approval_status: 'rejected',
+          updated_at: nowIso,
+        }).eq('id', user.id);
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase rejectOrganizerApplication fallback:', err);
+      }
+    }
+
+    return { application: { ...app }, user: { ...user } };
+  }
+
+  public async revokeOrganizerAccess(
+    userId: string,
+    reviewedByAdminEmail: string,
+    reason?: string
+  ): Promise<UserProfile> {
+    const cleanAdmin = reviewedByAdminEmail.trim().toLowerCase();
+    if (cleanAdmin !== 'admin@srmist.edu.in') {
+      throw new Error('FORBIDDEN_SUPER_ADMIN_REQUIRED: Only the designated Super Admin (admin@srmist.edu.in) can revoke organizer privileges.');
+    }
+
+    const user = this.profiles.get(userId);
+    if (!user) {
+      throw new Error('USER_NOT_FOUND: User profile not found.');
+    }
+
+    if (user.role === 'admin' || user.email.toLowerCase() === 'admin@srmist.edu.in') {
+      throw new Error('FORBIDDEN_SUPER_ADMIN_ACTION: Cannot revoke privileges from designated Super Admin.');
+    }
+
+    const nowIso = new Date().toISOString();
+    user.role = 'student';
+    user.approval_status = 'suspended';
+    user.updated_at = nowIso;
+    this.profiles.set(userId, user);
+
+    await this.addNotification({
+      user_id: user.id,
+      title: 'Organizer Access Suspended',
+      message: `Your organizer access for ${user.club_name || '1Kampus'} has been suspended by the administrator.${reason ? ` Reason: ${reason}` : ''}`,
+      type: 'info',
+    });
+
+    if (this.supabase) {
+      try {
+        await this.supabase.from('profiles').update({
+          role: 'student',
+          approval_status: 'suspended',
+          updated_at: nowIso,
+        }).eq('id', userId);
+      } catch (err) {
+        console.warn('[DatabaseStore] Supabase revokeOrganizerAccess fallback:', err);
+      }
+    }
+
+    return { ...user };
   }
 
   // --------------------------------------------------------------------------

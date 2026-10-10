@@ -139,8 +139,9 @@ export const OrganizerPage: React.FC = () => {
       navigate('/login');
       return;
     }
-    if (user && user.role !== 'organizer' && user.role !== 'admin') {
-      info('Organizer Access Required', 'Please select the Organizer persona from the navigation bar.');
+    if (user && user.role !== 'admin' && user.approval_status !== 'approved') {
+      setLoading(false);
+      return;
     }
     loadOrganizerData();
     loadOrganizationsMeta();
@@ -687,6 +688,119 @@ export const OrganizerPage: React.FC = () => {
 
     return true;
   });
+
+  if (user && user.role !== 'admin' && user.approval_status !== 'approved') {
+    const isPending = user.approval_status === 'pending';
+    const isRejected = user.approval_status === 'rejected';
+
+    return (
+      <div className="min-h-screen bg-canvas dark:bg-canvas-dark text-ink dark:text-ink-dark py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-2xl mx-auto space-y-6">
+          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-3xl p-8 shadow-card dark:shadow-card-dark space-y-6 text-center">
+            {isPending ? (
+              <>
+                <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+                  <Clock className="w-8 h-8 animate-spin" />
+                </div>
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider border border-amber-500/20">
+                    Pending Admin Approval
+                  </div>
+                  <h1 className="text-2xl sm:text-3xl font-display font-bold text-ink dark:text-ink-dark">
+                    Your organizer application is pending admin approval.
+                  </h1>
+                  <p className="text-sm text-ink-muted dark:text-ink-dark-muted max-w-lg mx-auto leading-relaxed">
+                    Your application to host and manage events for <span className="font-semibold text-ink dark:text-ink-dark">{user.club_name || 'your club'}</span> has been submitted to SRMIST administration.
+                  </p>
+                </div>
+
+                <div className="bg-canvas dark:bg-canvas-dark rounded-2xl p-5 border border-border dark:border-border-dark text-left space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-ink-dark-muted border-b border-border dark:border-border-dark pb-2">
+                    Application Details
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Applicant Name</span>
+                      <span className="font-semibold text-ink dark:text-ink-dark">{user.full_name}</span>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Official Email</span>
+                      <span className="font-semibold text-ink dark:text-ink-dark font-mono">{user.email}</span>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Club / Department</span>
+                      <span className="font-semibold text-brand-600 dark:text-brand-400">{user.club_name || 'Pending assignment'}</span>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Position</span>
+                      <span className="font-semibold text-ink dark:text-ink-dark">{user.position || 'Applicant'}</span>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Registration / Employee ID</span>
+                      <span className="font-semibold text-ink dark:text-ink-dark font-mono">{user.registration_number || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted dark:text-ink-dark-muted block">Status</span>
+                      <span className="font-bold text-amber-600 dark:text-amber-400 uppercase">PENDING</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 text-xs text-ink-muted dark:text-ink-dark-muted text-left flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    Pending applicants cannot create, publish, edit, or delete events or access organizer-only APIs. Once the SRMIST Super Admin approves your application, you will gain full event publishing privileges.
+                  </p>
+                </div>
+              </>
+            ) : isRejected ? (
+              <>
+                <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
+                  <XCircle className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <h1 className="text-2xl sm:text-3xl font-display font-bold text-ink dark:text-ink-dark">
+                    Organizer Application Rejected
+                  </h1>
+                  <p className="text-sm text-ink-muted dark:text-ink-dark-muted max-w-lg mx-auto leading-relaxed">
+                    Your application for organizer access was not approved by the SRMIST Super Admin.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto">
+                  <Building2 className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <h1 className="text-2xl sm:text-3xl font-display font-bold text-ink dark:text-ink-dark">
+                    Organizer Access Required
+                  </h1>
+                  <p className="text-sm text-ink-muted dark:text-ink-dark-muted max-w-lg mx-auto leading-relaxed">
+                    You are currently signed in with student permissions. To create and manage campus events, apply for an organizer account.
+                  </p>
+                </div>
+                <Button variant="primary" size="lg" onClick={() => navigate('/organizer/register')} className="mx-auto">
+                  Apply for Organizer Account
+                </Button>
+              </>
+            )}
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4 border-t border-border dark:border-border-dark">
+              <Button variant="outline" size="sm" onClick={() => navigate('/events')}>
+                Browse Campus Events
+              </Button>
+              {isRejected && (
+                <Button variant="primary" size="sm" onClick={() => navigate('/organizer/register')}>
+                  Submit New Application
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-canvas dark:bg-canvas-dark text-ink dark:text-ink-dark py-8 px-4 sm:px-6 lg:px-8 animate-fade-in">
