@@ -20,7 +20,7 @@ export const env = {
   SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
   SMTP_USER: process.env.SMTP_USER || '',
   SMTP_PASS: process.env.SMTP_PASS || '',
-  EMAIL_FROM: process.env.EMAIL_FROM || 'notifications@campusconnect.local',
+  EMAIL_FROM: process.env.EMAIL_FROM || 'notifications@1kampus.local',
 
   isProduction: process.env.NODE_ENV === 'production',
   isDevelopment: process.env.NODE_ENV !== 'production',
