@@ -98,6 +98,19 @@ class ApiClient {
     });
   }
 
+  public async login(payload: { email: string; password: string }) {
+    return this.request<{ user: UserProfile; token: string; mustChangePassword?: boolean }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async logout() {
+    return this.request<{ message: string }>('/auth/logout', {
+      method: 'POST',
+    });
+  }
+
   public async checkUnique(payload: { email?: string; registration_number?: string; excludeUserId?: string }) {
     return this.request<{ emailExists: boolean; registrationNumberExists: boolean }>('/auth/check-unique', {
       method: 'POST',

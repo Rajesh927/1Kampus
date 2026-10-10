@@ -48,19 +48,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (savedToken) {
           setToken(savedToken);
-          // Try validating with backend /me
+          // Validate session with backend /me
           try {
             const meRes = await api.getMe();
             if (meRes.success && meRes.data) {
               setUser(meRes.data);
               localStorage.setItem('cc_user', JSON.stringify(meRes.data));
+            } else {
+              // Token invalid or expired
+              localStorage.removeItem('cc_auth_token');
+              localStorage.removeItem('cc_user');
+              setUser(null);
+              setToken(null);
             }
           } catch (err) {
-            console.warn('Session verification fallback:', err);
+            console.warn('Session verification error:', err);
           }
-        } else {
-          // Default demo preview session: Alex Chen (Student) for immediate out-of-the-box immersion
-          await loginWithRole('student', 'alex.chen@student.srmist.edu.in');
         }
       } catch (err) {
         console.error('Auth initialization error:', err);
@@ -93,32 +96,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginWithSupabase = async (email: string, password: string): Promise<UserProfile | null> => {
-    if (!supabase) {
-      // If Supabase not configured, use local dev login with inferred role
-      let inferredRole: UserRole = 'student';
-      const cleanEmail = email.toLowerCase().trim();
-      if (cleanEmail === 'admin@srmist.edu.in' || cleanEmail.includes('admin')) {
-        inferredRole = 'admin';
-      } else if (cleanEmail.includes('organizer') || cleanEmail.includes('acm')) {
-        inferredRole = 'organizer';
-      }
-      return await loginWithRole(inferredRole, email.trim());
-    }
-
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-
-      if (data.session) {
-        setToken(data.session.access_token);
-        localStorage.setItem('cc_auth_token', data.session.access_token);
-        const meRes = await api.getMe();
-        if (meRes.success && meRes.data) {
-          setUser(meRes.data);
-          localStorage.setItem('cc_user', JSON.stringify(meRes.data));
-          return meRes.data;
+      // 1. Primary: Authenticate through backend REST API (handles password verification & returns cryptographically signed session token)
+      try {
+        const res = await api.login({ email, password });
+        if (res.success && res.data) {
+          setUser(res.data.user);
+          setToken(res.data.token);
+          localStorage.setItem('cc_auth_token', res.data.token);
+          localStorage.setItem('cc_user', JSON.stringify(res.data.user));
+          return res.data.user;
         }
+      } catch (apiErr: any) {
+        // If Supabase client is configured, also try Supabase Auth directly
+        if (supabase) {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          if (data.session) {
+            setToken(data.session.access_token);
+            localStorage.setItem('cc_auth_token', data.session.access_token);
+            const meRes = await api.getMe();
+            if (meRes.success && meRes.data) {
+              setUser(meRes.data);
+              localStorage.setItem('cc_user', JSON.stringify(meRes.data));
+              return meRes.data;
+            }
+          }
+        }
+        throw apiErr;
       }
       return null;
     } finally {

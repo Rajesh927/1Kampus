@@ -145,3 +145,8 @@ export const AdminOrganizerUpdateSchema = z.object({
   role: z.enum(['organizer', 'student']).optional(),
 });
 
+export const LoginSchema = z.object({
+  email: z.string().trim().email('Valid email address is required'),
+  password: z.string().min(1, 'Password is required'),
+});
+

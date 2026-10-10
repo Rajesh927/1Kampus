@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { db } from '../services/store.js';
+import { env } from '../config/env.js';
 import { UserProfile, UserRole } from '../types/index.js';
 
 // Extend Express Request interface to include user
@@ -13,46 +14,30 @@ declare global {
 
 /**
  * Optional authentication middleware:
- * Attaches user to req.user if a valid token or dev header is present, but doesn't block unauthenticated requests.
+ * Attaches verified user to req.user if a valid cryptographically signed token is present.
+ * Does not trust unverified client-supplied role headers.
  */
 export async function optionalAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
-    const devUserId = req.headers['x-user-id'] as string;
-    let devUserRole = (req.headers['x-user-role'] as UserRole) || 'student';
-    // Security: Only designated Super Admin account can claim admin role via dev headers
-    if (devUserRole === 'admin') {
-      const email = (req.headers['x-user-email'] as string || '').toLowerCase();
-      if (email !== 'admin@srmist.edu.in' && devUserId !== '00000000-0000-0000-0000-000000000001') {
-        devUserRole = 'student';
-      }
-    }
-    const devUserEmail = (req.headers['x-user-email'] as string) || (devUserId ? `${devUserId}@student.srmist.edu.in` : '');
-    const devUserName = (req.headers['x-user-name'] as string) || (devUserId ? `User ${devUserId}` : '');
 
-    // 1. Check development / test headers
-    if (devUserId) {
-      let profile = await db.getProfileById(devUserId);
-      if (!profile) {
-        // Auto-provision mock profile for dev / test
-        profile = await db.saveProfile({
-          id: devUserId,
-          email: devUserEmail,
-          full_name: devUserName,
-          role: devUserRole,
-        });
-      }
-      if (profile) {
-        req.user = profile;
-        return next();
-      }
-    }
-
-    // 2. Check Bearer token (Supabase Auth token)
+    // 1. Authenticate via Bearer Token (Cryptographically Signed Session Token or JWT)
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      
-      // If token is a test/demo token formatted as demo_<userId>
+
+      // A. 1Kampus Cryptographically Signed HMAC Session Token
+      if (token.startsWith('CC_SESSION_')) {
+        const session = db.verifySessionToken(token);
+        if (session) {
+          const profile = await db.getProfileById(session.userId);
+          if (profile) {
+            req.user = profile;
+            return next();
+          }
+        }
+      }
+
+      // B. Demo Session Token (for local vitest tests & non-production reviews)
       if (token.startsWith('demo_')) {
         const userId = token.replace('demo_', '');
         const profile = await db.getProfileById(userId);
@@ -62,7 +47,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
         }
       }
 
-      // If token is a JWT, extract payload subject for fallback resolution
+      // C. Supabase JWT Authentication
       try {
         const parts = token.split('.');
         if (parts.length === 3) {
@@ -84,7 +69,33 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
           }
         }
       } catch (parseErr) {
-        // Ignored, proceed to next
+        // Ignored, proceed
+      }
+    }
+
+    // 2. Local Testing & Mock Header Fallback (DISABLED in production)
+    if (!env.isProduction) {
+      const devUserId = req.headers['x-user-id'] as string;
+      if (devUserId) {
+        let profile = await db.getProfileById(devUserId);
+        if (!profile) {
+          const devUserRole = (req.headers['x-user-role'] as UserRole) || 'student';
+          // Security: Forging admin or organizer role via headers is strictly forbidden
+          if (devUserRole !== 'admin' && devUserRole !== 'organizer') {
+            const devUserEmail = (req.headers['x-user-email'] as string) || `${devUserId}@student.srmist.edu.in`;
+            const devUserName = (req.headers['x-user-name'] as string) || `User ${devUserId}`;
+            profile = await db.saveProfile({
+              id: devUserId,
+              email: devUserEmail,
+              full_name: devUserName,
+              role: 'student',
+            });
+          }
+        }
+        if (profile) {
+          req.user = profile;
+          return next();
+        }
       }
     }
 

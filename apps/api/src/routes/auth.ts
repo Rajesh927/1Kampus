@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../services/store.js';
+import { env } from '../config/env.js';
 import { requireAuth } from '../middleware/auth.js';
-import { validateRequest, ProfileUpdateSchema, StudentSignupSchema } from '../middleware/validation.js';
+import { validateRequest, ProfileUpdateSchema, StudentSignupSchema, LoginSchema } from '../middleware/validation.js';
 
 const router = Router();
 
@@ -41,10 +42,46 @@ router.patch('/me', requireAuth, validateRequest({ body: ProfileUpdateSchema }),
   });
 });
 
+// POST /api/v1/auth/login - Authenticate with email and password
+router.post('/auth/login', validateRequest({ body: LoginSchema }), async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  try {
+    const result = await db.authenticate(email, password);
+    if (!result) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password. Please check your credentials and try again.',
+        },
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        user: result.user,
+        token: result.token,
+        mustChangePassword: result.mustChangePassword,
+      },
+      message: 'Signed in successfully. Welcome to 1Kampus!',
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'AUTH_ERROR',
+        message: err.message || 'An error occurred during authentication.',
+      },
+    });
+  }
+});
+
 // POST /api/v1/auth/signup - Student signup with exactly 5 required fields
 router.post('/auth/signup', validateRequest({ body: StudentSignupSchema }), async (req: Request, res: Response) => {
-  const { full_name, registration_number, email, section, password: _password } = req.body;
-  // Security requirement: _password is intentionally NOT stored or logged in database profile
+  const { full_name, registration_number, email, section, password } = req.body;
 
   try {
     const student = await db.registerStudentProfile({
@@ -52,13 +89,16 @@ router.post('/auth/signup', validateRequest({ body: StudentSignupSchema }), asyn
       full_name,
       registration_number,
       section,
+      password,
     });
+
+    const token = db.generateSessionToken(student);
 
     res.status(201).json({
       success: true,
       data: {
         user: student,
-        token: `demo_${student.id}`,
+        token,
       },
       message: 'Student registration successful. Welcome to 1Kampus!',
     });
@@ -110,8 +150,27 @@ router.post('/auth/recover-password', async (req: Request, res: Response) => {
   });
 });
 
+// POST /api/v1/auth/logout - Invalidate user session
+router.post('/auth/logout', async (_req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    message: 'Signed out successfully.',
+  });
+});
+
 // POST /api/v1/auth/dev-login - Quick reviewer / developer role selector for demonstration & review
 router.post('/auth/dev-login', async (req: Request, res: Response) => {
+  if (env.isProduction) {
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'DEV_LOGIN_DISABLED',
+        message: 'Instant role login is disabled in production. Please sign in with your email and password.',
+      },
+    });
+    return;
+  }
+
   const { role, email } = req.body;
   const profiles = await db.listAllProfiles();
   
@@ -141,11 +200,13 @@ router.post('/auth/dev-login', async (req: Request, res: Response) => {
     });
   }
 
+  const token = db.generateSessionToken(target);
+
   res.status(200).json({
     success: true,
     data: {
       user: target,
-      token: `demo_${target.id}`,
+      token,
     },
   });
 });

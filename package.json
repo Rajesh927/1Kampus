@@ -16,7 +16,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "provision:admin": "npm --workspace=@campusconnect/api run provision:admin"
+    "provision:admin": "npm --workspace=@campusconnect/api run provision:admin",
+    "provision:organizer": "npm --workspace=@campusconnect/api run provision:organizer"
   },
   "keywords": [
     "campus-events",

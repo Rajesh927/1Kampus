@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "provision:admin": "tsx src/scripts/provision-super-admin.ts"
+    "provision:admin": "tsx src/scripts/provision-super-admin.ts",
+    "provision:organizer": "tsx src/scripts/provision-organizer.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

@@ -1055,4 +1055,219 @@ describe('1Kampus Backend API Tests', () => {
       expect(announceRes.body.error.code).toBe('INVALID_ANNOUNCEMENT');
     });
   });
+
+  // 14. 1Kampus Authentication, Password Verification & RBAC Enforcement
+  describe('1Kampus Authentication, Password Verification & RBAC Enforcement', () => {
+    const studentCredentials = {
+      full_name: 'Harish Kalyan',
+      registration_number: 'RA2311003010777',
+      email: 'harish.k@student.srmist.edu.in',
+      section: 'CSE-C',
+      password: 'MySecretPassword#2026',
+    };
+
+    let studentSessionToken: string;
+
+    it('1. Student registration with password hashes password, stores credentials, and returns signed session token', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/signup')
+        .send(studentCredentials);
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.user.email).toBe(studentCredentials.email);
+      expect(res.body.data.user.role).toBe('student');
+      // Critical security check: Password MUST NEVER be in profile or response
+      expect(res.body.data.user.password).toBeUndefined();
+      expect(res.body.data.user.passwordHash).toBeUndefined();
+      expect(res.body.data.user.salt).toBeUndefined();
+      expect(res.body.data.token).toBeDefined();
+      expect(res.body.data.token.startsWith('CC_SESSION_')).toBe(true);
+    });
+
+    it('2. Prevents duplicate email registration (409 DUPLICATE_RECORD)', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/signup')
+        .send({
+          ...studentCredentials,
+          registration_number: 'RA2311003010888', // different reg, same email
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('DUPLICATE_RECORD');
+    });
+
+    it('3. Prevents duplicate registration number registration (409 DUPLICATE_RECORD)', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/signup')
+        .send({
+          ...studentCredentials,
+          email: 'unique.different@student.srmist.edu.in', // different email, same reg
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('DUPLICATE_RECORD');
+    });
+
+    it('4. Student login with correct password succeeds and returns cryptographically signed session token', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: studentCredentials.email,
+          password: studentCredentials.password,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.user.email).toBe(studentCredentials.email);
+      expect(res.body.data.user.role).toBe('student');
+      expect(res.body.data.token).toBeDefined();
+      expect(res.body.data.token.startsWith('CC_SESSION_')).toBe(true);
+      // Save token for subsequent authorization tests
+      studentSessionToken = res.body.data.token;
+    });
+
+    it('5. Student login with incorrect password is rejected (401 INVALID_CREDENTIALS)', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: studentCredentials.email,
+          password: 'IncorrectPassword999!',
+        });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+      expect(res.body.error.message).toContain('Invalid email or password');
+    });
+
+    it('6. Student login with non-existent email is rejected (401 INVALID_CREDENTIALS)', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'nonexistent.user@srmist.edu.in',
+          password: 'AnyPassword123!',
+        });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
+    });
+
+    it('7. Authenticated student is denied access to organizer dashboard (403 FORBIDDEN)', async () => {
+      const res = await request(app)
+        .get('/api/v1/organizer/overview')
+        .set('Authorization', `Bearer ${studentSessionToken}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+
+    it('8. Authenticated student is denied access to Super Admin console (403 FORBIDDEN)', async () => {
+      const res = await request(app)
+        .get('/api/v1/admin/overview')
+        .set('Authorization', `Bearer ${studentSessionToken}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+    });
+
+    it('9. Client attempting to forge role via headers without authorization token is rejected (401/403)', async () => {
+      const res = await request(app)
+        .get('/api/v1/admin/overview')
+        .set('x-user-id', 'rogue-attacker-id')
+        .set('x-user-role', 'admin');
+
+      // Middleware must not grant admin privileges to rogue headers
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('10. Pre-authorized organizer authenticates with password and accesses organizer features', async () => {
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'acm@srmist.edu.in',
+          password: 'Organizer@1Kampus2026!',
+        });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.data.user.role).toBe('organizer');
+
+      const orgToken = loginRes.body.data.token;
+
+      // Access organizer overview with valid token
+      const overviewRes = await request(app)
+        .get('/api/v1/organizer/overview')
+        .set('Authorization', `Bearer ${orgToken}`);
+
+      expect(overviewRes.status).toBe(200);
+      expect(overviewRes.body.success).toBe(true);
+      expect(overviewRes.body.data).toHaveProperty('total_events');
+    });
+
+    it('11. Designated Super Admin (admin@srmist.edu.in) authenticates and accesses admin console', async () => {
+      const adminPass = process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!';
+      const loginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({
+          email: 'admin@srmist.edu.in',
+          password: adminPass,
+        });
+
+      expect(loginRes.status).toBe(200);
+      expect(loginRes.body.success).toBe(true);
+      expect(loginRes.body.data.user.email).toBe('admin@srmist.edu.in');
+      expect(loginRes.body.data.user.role).toBe('admin');
+      expect(loginRes.body.data.user.full_name).toBe('SRMIST');
+
+      const adminToken = loginRes.body.data.token;
+
+      // Access Super Admin overview
+      const adminRes = await request(app)
+        .get('/api/v1/admin/overview')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(adminRes.status).toBe(200);
+      expect(adminRes.body.success).toBe(true);
+      expect(adminRes.body.data).toHaveProperty('total_users');
+    });
+
+    it('12. Protected API routes reject unauthenticated requests without token (401 UNAUTHORIZED)', async () => {
+      const res = await request(app).get('/api/v1/me');
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe('UNAUTHORIZED');
+    });
+
+    it('13. Authenticated session fetches verified profile via GET /api/v1/me', async () => {
+      const res = await request(app)
+        .get('/api/v1/me')
+        .set('Authorization', `Bearer ${studentSessionToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.email).toBe(studentCredentials.email);
+      expect(res.body.data.full_name).toBe(studentCredentials.full_name);
+    });
+
+    it('14. POST /api/v1/auth/logout succeeds and confirms sign out', async () => {
+      const res = await request(app).post('/api/v1/auth/logout');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toContain('Signed out successfully');
+    });
+
+    it('15. API returns JSON format with application/json header, never HTML', async () => {
+      const res = await request(app).get('/api/v1/health');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('application/json');
+      expect(res.body.data.service).toBe('1Kampus API');
+    });
+  });
 });

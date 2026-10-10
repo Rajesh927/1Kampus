@@ -15,6 +15,33 @@ import { OrganizerPage } from './pages/OrganizerPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AuthPage } from './pages/AuthPage.js';
 
+import { useAuth } from './context/AuthContext.js';
+
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  allowedRoles?: Array<'student' | 'organizer' | 'admin'>;
+}> = ({ children, allowedRoles }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-brand-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/events" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
@@ -28,9 +55,30 @@ export const App: React.FC = () => {
                   <Route path="/" element={<LandingPage />} />
                   <Route path="/events" element={<EventsPage />} />
                   <Route path="/events/:id" element={<EventDetailPage />} />
-                  <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/organizer" element={<OrganizerPage />} />
-                  <Route path="/admin" element={<AdminPage />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute allowedRoles={['student', 'organizer', 'admin']}>
+                        <DashboardPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/organizer"
+                    element={
+                      <ProtectedRoute allowedRoles={['organizer', 'admin']}>
+                        <OrganizerPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminPage />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route path="/login" element={<AuthPage initialMode="login" />} />
                   <Route path="/signup" element={<AuthPage initialMode="signup" />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

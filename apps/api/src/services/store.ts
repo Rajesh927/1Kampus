@@ -4,6 +4,65 @@ import { env } from '../config/env.js';
 import { EventItem, RegistrationItem, UserProfile, EventCategory, EventStatus, NotificationItem, UserRole, EventType, ApprovedOrganization, OrganizerOverview } from '../types/index.js';
 import { APPROVED_ORGANIZATIONS } from '../config/organizations.js';
 
+// ----------------------------------------------------------------------------
+// CRYPTOGRAPHIC CREDENTIALS & SESSION TOKEN SECURITY
+// ----------------------------------------------------------------------------
+export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
+  const s = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, s, 64).toString('hex');
+  return { hash, salt: s };
+}
+
+export function verifyPassword(password: string, storedHash: string, salt: string): boolean {
+  try {
+    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+export interface SessionPayload {
+  sub: string;
+  email: string;
+  role: UserRole;
+  exp: number;
+}
+
+export function signSessionToken(payload: SessionPayload, secret: string): string {
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const hmac = crypto.createHmac('sha256', secret);
+  hmac.update(data);
+  const signature = hmac.digest('base64url');
+  return `CC_SESSION_${data}.${signature}`;
+}
+
+export function verifySessionToken(token: string, secret: string): SessionPayload | null {
+  if (!token || !token.startsWith('CC_SESSION_')) return null;
+  const raw = token.replace('CC_SESSION_', '');
+  const dotIndex = raw.indexOf('.');
+  if (dotIndex === -1) return null;
+  const data = raw.substring(0, dotIndex);
+  const signature = raw.substring(dotIndex + 1);
+  if (!data || !signature) return null;
+
+  try {
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(data);
+    const expectedSig = hmac.digest('base64url');
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+      return null;
+    }
+    const payload: SessionPayload = JSON.parse(Buffer.from(data, 'base64url').toString('utf-8'));
+    if (payload.exp && Date.now() > payload.exp) {
+      return null; // Expired session
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Seed demo user profiles
 const INITIAL_PROFILES: UserProfile[] = [
   {
@@ -383,6 +442,7 @@ class DatabaseStore {
   private events: Map<string, EventItem> = new Map();
   private registrations: Map<string, RegistrationItem> = new Map();
   private notifications: Map<string, NotificationItem> = new Map();
+  private credentials: Map<string, { email: string; passwordHash: string; salt: string; mustChangePassword?: boolean }> = new Map();
   private supabase: SupabaseClient | null = null;
   // Mutex lock for atomic registration concurrency
   private registrationMutex: Promise<any> = Promise.resolve();
@@ -392,6 +452,16 @@ class DatabaseStore {
     INITIAL_PROFILES.forEach(p => this.profiles.set(p.id, { ...p }));
     INITIAL_EVENTS.forEach(e => this.events.set(e.id, { ...e }));
     INITIAL_REGISTRATIONS.forEach(r => this.registrations.set(r.id, { ...r }));
+
+    // Seed secure hashed credentials for designated accounts
+    const initialAdminPass = process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!';
+    this.setCredentials('admin@srmist.edu.in', initialAdminPass);
+    this.setCredentials('acm@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('robotics@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('ecell@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('milan@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('alex.chen@student.srmist.edu.in', 'Student@1Kampus2026!');
+    this.setCredentials('priya.s@student.srmist.edu.in', 'Student@1Kampus2026!');
 
     if (env.SUPABASE_URL && (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY)) {
       try {
@@ -418,6 +488,95 @@ class DatabaseStore {
 
   public isUsingSupabase(): boolean {
     return this.supabase !== null;
+  }
+
+  // --------------------------------------------------------------------------
+  // AUTHENTICATION & CREDENTIALS MANAGEMENT
+  // --------------------------------------------------------------------------
+  public setCredentials(email: string, password: string, mustChangePassword = false): void {
+    const cleanEmail = email.trim().toLowerCase();
+    const { hash, salt } = hashPassword(password);
+    this.credentials.set(cleanEmail, {
+      email: cleanEmail,
+      passwordHash: hash,
+      salt,
+      mustChangePassword,
+    });
+  }
+
+  public hasCredentials(email: string): boolean {
+    return this.credentials.has(email.trim().toLowerCase());
+  }
+
+  public generateSessionToken(user: UserProfile): string {
+    const secret = env.SUPABASE_JWT_SECRET || '1kampus-jwt-secret-session-key-2026';
+    const payload: SessionPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      exp: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days expiration
+    };
+    return signSessionToken(payload, secret);
+  }
+
+  public verifySessionToken(token: string): { userId: string; role: UserRole; email: string } | null {
+    const secret = env.SUPABASE_JWT_SECRET || '1kampus-jwt-secret-session-key-2026';
+    const payload = verifySessionToken(token, secret);
+    if (!payload) return null;
+    return {
+      userId: payload.sub,
+      role: payload.role,
+      email: payload.email,
+    };
+  }
+
+  public async authenticate(email: string, password: string): Promise<{ user: UserProfile; token: string; mustChangePassword?: boolean } | null> {
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. If Supabase is active, attempt Supabase Auth sign in
+    if (this.supabase) {
+      try {
+        const { data, error } = await this.supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (!error && data.user) {
+          let profile = await this.getProfileById(data.user.id);
+          if (!profile) {
+            profile = await this.getProfileByEmail(cleanEmail);
+          }
+          if (profile) {
+            const token = this.generateSessionToken(profile);
+            return { user: profile, token };
+          }
+        }
+      } catch (err) {
+        // Fall back to resilient local credentials check
+      }
+    }
+
+    // 2. Validate against salted scrypt hashed credentials
+    const cred = this.credentials.get(cleanEmail);
+    if (!cred) {
+      return null;
+    }
+
+    const isValid = verifyPassword(password, cred.passwordHash, cred.salt);
+    if (!isValid) {
+      return null;
+    }
+
+    const profile = await this.getProfileByEmail(cleanEmail);
+    if (!profile) {
+      return null;
+    }
+
+    const token = this.generateSessionToken(profile);
+    return {
+      user: profile,
+      token,
+      mustChangePassword: cred.mustChangePassword,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -476,6 +635,7 @@ class DatabaseStore {
     registration_number: string;
     section: string;
     avatar_url?: string;
+    password?: string;
   }): Promise<UserProfile> {
     const cleanEmail = data.email.trim().toLowerCase();
     const cleanReg = data.registration_number.trim().toUpperCase();
@@ -490,6 +650,11 @@ class DatabaseStore {
     // Check duplicate registration number
     if (await this.checkRegistrationNumberExists(cleanReg, data.id)) {
       throw new Error('DUPLICATE_REGISTRATION_NUMBER: An account with this college registration number already exists.');
+    }
+
+    // Securely hash and store credentials (never exposed in public profile data)
+    if (data.password) {
+      this.setCredentials(cleanEmail, data.password);
     }
 
     const id = data.id || `00000000-0000-0000-0000-${Date.now().toString(16).padStart(12, '0')}`;
@@ -832,6 +997,56 @@ class DatabaseStore {
   // --------------------------------------------------------------------------
   // DESIGNATED SUPER ADMIN INTEGRITY
   // --------------------------------------------------------------------------
+  public async provisionOrganizer(params: {
+    email: string;
+    fullName: string;
+    organization: string;
+    temporaryPassword?: string;
+  }): Promise<{ organizer: UserProfile; temporaryPassword?: string }> {
+    const cleanEmail = params.email.trim().toLowerCase();
+    let tempPass = params.temporaryPassword;
+    let isGenerated = false;
+
+    if (!tempPass) {
+      tempPass = `Org!${crypto.randomBytes(8).toString('hex')}#2026`;
+      isGenerated = true;
+    }
+
+    let existing = await this.getProfileByEmail(cleanEmail);
+    if (existing) {
+      existing.full_name = params.fullName.trim();
+      existing.role = 'organizer';
+      existing.section = params.organization.trim();
+      existing.updated_at = new Date().toISOString();
+      this.profiles.set(existing.id, existing);
+    } else {
+      const id = `00000000-0000-0000-0000-${Date.now().toString(16).padStart(12, '0')}`;
+      existing = {
+        id,
+        email: cleanEmail,
+        full_name: params.fullName.trim(),
+        role: 'organizer',
+        registration_number: `ORG-${Date.now().toString(16).slice(-4).toUpperCase()}`,
+        section: params.organization.trim(),
+        avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=256&q=80',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      this.profiles.set(id, existing);
+    }
+
+    this.setCredentials(cleanEmail, tempPass, isGenerated);
+    return { organizer: existing, temporaryPassword: tempPass };
+  }
+
+  public async resetPassword(email: string, newPassword: string): Promise<boolean> {
+    const cleanEmail = email.trim().toLowerCase();
+    const profile = await this.getProfileByEmail(cleanEmail);
+    if (!profile) return false;
+    this.setCredentials(cleanEmail, newPassword, false);
+    return true;
+  }
+
   public async ensureDesignatedSuperAdmin(): Promise<{
     superAdmin: UserProfile;
     conflicts: Array<{ id: string; email: string; full_name: string }>;
