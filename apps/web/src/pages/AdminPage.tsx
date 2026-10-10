@@ -47,16 +47,19 @@ export const AdminPage: React.FC = () => {
   const [applications, setApplications] = useState<OrganizerApplication[]>([]);
   const [pendingApplicationsCount, setPendingApplicationsCount] = useState<number>(0);
   const [loadingApplications, setLoadingApplications] = useState<boolean>(false);
+  const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [appStatusFilter, setAppStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [appSearchQuery, setAppSearchQuery] = useState('');
+  const [approvingApp, setApprovingApp] = useState<OrganizerApplication | null>(null);
+  const [submittingApproval, setSubmittingApproval] = useState(false);
   const [rejectingApp, setRejectingApp] = useState<OrganizerApplication | null>(null);
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
   const [submittingRejection, setSubmittingRejection] = useState(false);
-  const [approvingAppId, setApprovingAppId] = useState<string | null>(null);
   const [revokingUserId, setRevokingUserId] = useState<string | null>(null);
   const [revokeOrgName, setRevokeOrgName] = useState<string>('');
   const [revokeReasonInput, setRevokeReasonInput] = useState('');
   const [submittingRevoke, setSubmittingRevoke] = useState(false);
+
 
   // Super Admin Status State
   const [superAdminInfo, setSuperAdminInfo] = useState<{
@@ -151,7 +154,7 @@ export const AdminPage: React.FC = () => {
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [ovRes, evRes, orgRes, saRes, appRes] = await Promise.all([
+      const results = await Promise.allSettled([
         api.getAdminOverview(),
         api.getEvents({ limit: 50, status: undefined }),
         api.getAdminOrganizers(),
@@ -159,14 +162,25 @@ export const AdminPage: React.FC = () => {
         api.getAdminOrganizerApplications('all'),
       ]);
 
-      if (ovRes.success && ovRes.data) setOverview(ovRes.data);
-      if (evRes.success && evRes.data) setEvents(evRes.data);
-      if (orgRes.success && orgRes.data) setOrganizers(orgRes.data);
-      if (saRes.success && saRes.data) setSuperAdminInfo(saRes.data);
-      if (appRes.success && appRes.data) {
-        setApplications(appRes.data);
-        const pending = appRes.data.filter(a => a.status === 'pending').length;
+      if (results[0].status === 'fulfilled' && results[0].value.success && results[0].value.data) {
+        setOverview(results[0].value.data);
+      }
+      if (results[1].status === 'fulfilled' && results[1].value.success && results[1].value.data) {
+        setEvents(results[1].value.data);
+      }
+      if (results[2].status === 'fulfilled' && results[2].value.success && results[2].value.data) {
+        setOrganizers(results[2].value.data);
+      }
+      if (results[3].status === 'fulfilled' && results[3].value.success && results[3].value.data) {
+        setSuperAdminInfo(results[3].value.data);
+      }
+      if (results[4].status === 'fulfilled' && results[4].value.success && results[4].value.data) {
+        setApplications(results[4].value.data);
+        const pending = results[4].value.data.filter(a => a.status.toLowerCase() === 'pending').length;
         setPendingApplicationsCount(pending);
+        setApplicationsError(null);
+      } else if (results[4].status === 'rejected') {
+        setApplicationsError((results[4].reason as Error)?.message || 'Failed to fetch organizer applications.');
       }
     } catch (err: any) {
       error('Admin Load Failed', err.message);
@@ -177,33 +191,44 @@ export const AdminPage: React.FC = () => {
 
   const loadApplications = async () => {
     setLoadingApplications(true);
+    setApplicationsError(null);
     try {
       const res = await api.getAdminOrganizerApplications('all');
       if (res.success && res.data) {
         setApplications(res.data);
-        const pending = res.data.filter(a => a.status === 'pending').length;
+        const pending = res.data.filter(a => a.status.toLowerCase() === 'pending').length;
         setPendingApplicationsCount(pending);
+      } else {
+        const errMsg = res.error?.message || 'Could not load organizer applications from server.';
+        setApplicationsError(errMsg);
+        error('Applications Load Error', errMsg);
       }
     } catch (err: any) {
-      console.warn('Failed to refresh applications:', err);
+      console.error('Failed to refresh applications:', err);
+      const errMsg = err.message || 'Network error fetching organizer applications.';
+      setApplicationsError(errMsg);
+      error('Applications Load Error', errMsg);
     } finally {
       setLoadingApplications(false);
     }
   };
 
-  const handleApproveApplication = async (app: OrganizerApplication) => {
-    setApprovingAppId(app.id);
+  const handleConfirmApprove = async () => {
+    if (!approvingApp) return;
+    setSubmittingApproval(true);
     try {
-      const res = await api.approveOrganizerApplication(app.id);
+      const res = await api.approveOrganizerApplication(approvingApp.id);
       if (res.success) {
-        success('Application Approved', `Organizer privileges granted to ${app.full_name} (${app.club_name}).`);
-        loadApplications();
-        loadAdminData();
+        success('Organizer Approved', `Organizer privileges granted to ${approvingApp.full_name} (${approvingApp.club_name}).`);
+        setApprovingApp(null);
+        await Promise.all([loadApplications(), loadAdminData()]);
+      } else {
+        throw new Error(res.error?.message || 'Approval was rejected by server.');
       }
     } catch (err: any) {
-      error('Approval Failed', err.message);
+      error('Approval Failed', err.message || 'Could not approve organizer application.');
     } finally {
-      setApprovingAppId(null);
+      setSubmittingApproval(false);
     }
   };
 
@@ -214,14 +239,15 @@ export const AdminPage: React.FC = () => {
     try {
       const res = await api.rejectOrganizerApplication(rejectingApp.id, rejectionReasonInput.trim());
       if (res.success) {
-        success('Application Rejected', `Application for ${rejectingApp.full_name} was rejected.`);
+        success('Application Rejected', `Organizer application for ${rejectingApp.full_name} was rejected.`);
         setRejectingApp(null);
         setRejectionReasonInput('');
-        loadApplications();
-        loadAdminData();
+        await Promise.all([loadApplications(), loadAdminData()]);
+      } else {
+        throw new Error(res.error?.message || 'Rejection was rejected by server.');
       }
     } catch (err: any) {
-      error('Rejection Failed', err.message);
+      error('Rejection Failed', err.message || 'Could not reject organizer application.');
     } finally {
       setSubmittingRejection(false);
     }
@@ -496,8 +522,11 @@ export const AdminPage: React.FC = () => {
           {/* Tab Navigation */}
           <div className="flex items-center gap-2 p-1.5 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-xs overflow-x-auto">
             <button
-              onClick={() => setActiveTab('applications')}
-              id="admin-tab-applications"
+              onClick={() => {
+                setActiveTab('applications');
+                setAppStatusFilter('pending');
+              }}
+              id="admin-tab-pending-requests"
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 relative ${
                 activeTab === 'applications'
                   ? 'bg-brand-600 text-white shadow-xs'
@@ -505,16 +534,16 @@ export const AdminPage: React.FC = () => {
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>Organizer Applications</span>
+              <span>Pending Organizer Requests</span>
               {pendingApplicationsCount > 0 ? (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white shadow-xs animate-pulse">
-                  {pendingApplicationsCount} Pending
+                  Pending Requests ({pendingApplicationsCount})
                 </span>
               ) : (
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                   activeTab === 'applications' ? 'bg-white/20 text-white' : 'bg-surface-subtle dark:bg-surface-dark-subtle text-ink'
                 }`}>
-                  {applications.length}
+                  Pending Requests (0)
                 </span>
               )}
             </button>
@@ -568,6 +597,72 @@ export const AdminPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Prominent Quick-Access Dashboard Card: Pending Organizer Requests */}
+        <div
+          onClick={() => {
+            setActiveTab('applications');
+            setAppStatusFilter('pending');
+          }}
+          id="admin-card-pending-requests"
+          className={`rounded-3xl p-6 border transition-all duration-200 cursor-pointer shadow-card dark:shadow-card-dark relative overflow-hidden group ${
+            pendingApplicationsCount > 0
+              ? 'bg-gradient-to-r from-amber-500/15 via-surface to-brand-500/10 dark:from-amber-950/40 dark:via-surface-dark dark:to-brand-950/30 border-amber-300 dark:border-amber-700/80 hover:border-amber-400 dark:hover:border-amber-600 shadow-md hover:shadow-lg'
+              : 'bg-surface dark:bg-surface-dark border-border dark:border-border-dark hover:border-brand-400 dark:hover:border-brand-600'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                pendingApplicationsCount > 0
+                  ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25 animate-pulse'
+                  : 'bg-brand-50 dark:bg-brand-950/80 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800'
+              }`}>
+                <FileText className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <h3 className="font-display font-extrabold text-lg text-ink dark:text-ink-dark group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                    Pending Organizer Requests
+                  </h3>
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold ${
+                    pendingApplicationsCount > 0
+                      ? 'bg-amber-500 text-white shadow-xs'
+                      : 'bg-surface-subtle dark:bg-surface-dark-subtle text-ink-muted dark:text-ink-dark-muted border border-border dark:border-border-dark'
+                  }`}>
+                    {pendingApplicationsCount > 0 ? (
+                      <>
+                        <Clock className="w-3 h-3" />
+                        <span>Pending Requests ({pendingApplicationsCount})</span>
+                      </>
+                    ) : (
+                      <span>Pending Requests (0)</span>
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-ink-muted dark:text-ink-dark-muted leading-relaxed">
+                  {pendingApplicationsCount > 0
+                    ? `${pendingApplicationsCount} official campus club or faculty organizer application${pendingApplicationsCount === 1 ? '' : 's'} awaiting your Super Admin approval. Click to review immediately.`
+                    : 'All organizer applications are currently up to date. Verified organizers can manage campus events.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                  pendingApplicationsCount > 0
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                    : 'bg-brand-600 hover:bg-brand-700 text-white'
+                }`}
+              >
+                <span>{pendingApplicationsCount > 0 ? 'Review Pending Requests' : 'View All Applications'}</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Administrator Conflict Warning Banner (if unexpected extra admin accounts exist) */}
         {superAdminInfo?.has_conflicts && (
           <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
@@ -584,10 +679,10 @@ export const AdminPage: React.FC = () => {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 0: ORGANIZER APPLICATIONS (Super Admin Exclusively) */}
+        {/* TAB 0: PENDING ORGANIZER REQUESTS (Super Admin Exclusively) */}
         {/* ========================================================================= */}
         {activeTab === 'applications' && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-6 animate-fade-in" id="pending-organizer-requests-section">
             {/* Header Telemetry & Filter Bar */}
             <div className="bg-surface dark:bg-surface-dark rounded-3xl p-5 border border-border dark:border-border-dark shadow-card dark:shadow-card-dark flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
               {/* Search */}
@@ -604,21 +699,45 @@ export const AdminPage: React.FC = () => {
 
               {/* Status Filter Buttons */}
               <div className="flex items-center gap-1.5 p-1 bg-surface-subtle dark:bg-surface-dark-subtle rounded-xl border border-border dark:border-border-dark overflow-x-auto">
-                {(['all', 'pending', 'approved', 'rejected'] as const).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setAppStatusFilter(tab)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer whitespace-nowrap ${
-                      appStatusFilter === tab
-                        ? 'bg-brand-600 text-white shadow-xs'
-                        : 'text-ink-muted dark:text-ink-dark-muted hover:text-ink'
-                    }`}
-                  >
-                    {tab === 'all' ? `All (${applications.length})` : tab === 'pending' ? `Pending (${pendingApplicationsCount})` : tab}
-                  </button>
-                ))}
+                {(['pending', 'approved', 'rejected', 'all'] as const).map(tab => {
+                  const count =
+                    tab === 'all'
+                      ? applications.length
+                      : applications.filter(a => a.status.toLowerCase() === tab).length;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setAppStatusFilter(tab)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer whitespace-nowrap ${
+                        appStatusFilter === tab
+                          ? tab === 'pending'
+                            ? 'bg-amber-500 text-white shadow-xs'
+                            : 'bg-brand-600 text-white shadow-xs'
+                          : 'text-ink-muted dark:text-ink-dark-muted hover:text-ink'
+                      }`}
+                    >
+                      {tab === 'pending' ? `Pending Requests (${count})` : `${tab} (${count})`}
+                    </button>
+                  );
+                })}
               </div>
             </div>
+
+            {/* Error Banner State (if API call failed) */}
+            {applicationsError && (
+              <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-xs text-red-900 dark:text-red-200 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+                  <div>
+                    <h5 className="font-bold text-sm">Failed to Load Organizer Applications</h5>
+                    <p className="mt-0.5">{applicationsError}</p>
+                  </div>
+                </div>
+                <Button variant="secondary" size="sm" onClick={loadApplications} loading={loadingApplications}>
+                  Retry Connection
+                </Button>
+              </div>
+            )}
 
             {/* Applications Table */}
             <div className="bg-surface dark:bg-surface-dark rounded-3xl border border-border dark:border-border-dark shadow-card dark:shadow-card-dark overflow-hidden">
@@ -626,17 +745,22 @@ export const AdminPage: React.FC = () => {
                 <div>
                   <h3 className="font-display font-bold text-lg text-ink dark:text-ink-dark flex items-center gap-2">
                     <FileText className="w-5 h-5 text-brand-600 dark:text-brand-400" />
-                    <span>Organizer Applications Review</span>
+                    <span>Pending Organizer Requests & Approvals</span>
                   </h3>
                   <p className="text-xs text-ink-muted dark:text-ink-dark-muted mt-0.5">
                     Official requests submitted for campus event publishing access. Enforced solely by SRMIST Super Admin.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {pendingApplicationsCount > 0 && (
+                  {pendingApplicationsCount > 0 ? (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold animate-pulse">
                       <Clock className="w-3.5 h-3.5" />
-                      {pendingApplicationsCount} Action Required
+                      Pending Requests ({pendingApplicationsCount})
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      All Requests Reviewed
                     </span>
                   )}
                   <Button variant="secondary" size="sm" onClick={loadApplications} loading={loadingApplications}>
@@ -645,127 +769,166 @@ export const AdminPage: React.FC = () => {
                 </div>
               </div>
 
-              {applications.length === 0 ? (
+              {loadingApplications ? (
+                <div className="py-16 text-center space-y-4">
+                  <div className="w-8 h-8 border-3 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-ink-muted dark:text-ink-dark-muted">Loading organizer applications from server...</p>
+                </div>
+              ) : applications.length === 0 ? (
                 <div className="py-16 text-center space-y-3">
                   <div className="w-12 h-12 rounded-2xl bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto">
                     <FileText className="w-6 h-6" />
                   </div>
                   <h4 className="font-display font-bold text-base text-ink dark:text-ink-dark">No Applications Found</h4>
                   <p className="text-xs text-ink-muted dark:text-ink-dark-muted max-w-sm mx-auto">
-                    No organizer applications have been received yet.
+                    No organizer applications have been received yet. New requests submitted via the organizer registration form will appear here.
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-border dark:border-border-dark text-ink-faint dark:text-ink-dark-muted font-bold uppercase tracking-wider bg-surface-subtle/40 dark:bg-surface-dark-subtle/40">
-                        <th className="py-3.5 px-5">Applicant Name & Email</th>
-                        <th className="py-3.5 px-4">Employee / Reg ID</th>
-                        <th className="py-3.5 px-4">Club / Department & Position</th>
-                        <th className="py-3.5 px-4 max-w-xs">Application Reason</th>
-                        <th className="py-3.5 px-4">Submitted Date</th>
-                        <th className="py-3.5 px-4">Status</th>
-                        <th className="py-3.5 px-5 text-right">Super Admin Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60 dark:divide-border-dark/60">
-                      {applications
-                        .filter(app => {
-                          if (appStatusFilter !== 'all' && app.status !== appStatusFilter) return false;
-                          if (appSearchQuery.trim()) {
-                            const q = appSearchQuery.toLowerCase();
-                            return (
-                              app.full_name.toLowerCase().includes(q) ||
-                              app.email.toLowerCase().includes(q) ||
-                              app.employee_id.toLowerCase().includes(q) ||
-                              app.club_name.toLowerCase().includes(q) ||
-                              app.position.toLowerCase().includes(q)
-                            );
-                          }
-                          return true;
-                        })
-                        .map(app => (
-                          <tr key={app.id} className="hover:bg-surface-subtle/80 dark:hover:bg-surface-dark-subtle/50 transition-colors">
-                            <td className="py-3.5 px-5">
-                              <span className="font-semibold text-ink dark:text-ink-dark block">{app.full_name}</span>
-                              <span className="text-ink-muted dark:text-ink-dark-muted font-mono text-[11px]">{app.email}</span>
-                            </td>
-                            <td className="py-3.5 px-4 font-mono font-medium text-ink dark:text-ink-dark">
-                              {app.employee_id}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <span className="font-semibold text-brand-600 dark:text-brand-400 block">{app.club_name}</span>
-                              <span className="text-ink-muted dark:text-ink-dark-muted text-[11px]">{app.position}</span>
-                            </td>
-                            <td className="py-3.5 px-4 max-w-xs">
-                              <p className="text-ink dark:text-ink-dark text-[11px] line-clamp-2 italic" title={app.reason}>
-                                "{app.reason}"
-                              </p>
-                            </td>
-                            <td className="py-3.5 px-4 text-ink-muted dark:text-ink-dark-muted text-[11px] whitespace-nowrap">
-                              {new Date(app.submitted_at).toLocaleDateString()}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              {app.status === 'pending' ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-bold">
-                                  <Clock className="w-3 h-3 animate-spin" />
-                                  PENDING
-                                </span>
-                              ) : app.status === 'approved' ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  APPROVED
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-[11px] font-bold">
-                                  <XCircle className="w-3 h-3" />
-                                  REJECTED
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3.5 px-5 text-right whitespace-nowrap">
-                              {app.status === 'pending' ? (
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button
-                                    variant="primary"
-                                    size="sm"
-                                    loading={approvingAppId === app.id}
-                                    icon={<UserCheck className="w-3.5 h-3.5" />}
-                                    onClick={() => handleApproveApplication(app)}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                                  >
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    icon={<UserX className="w-3.5 h-3.5" />}
-                                    onClick={() => {
-                                      setRejectingApp(app);
-                                      setRejectionReasonInput('');
-                                    }}
-                                    className="text-red-600 hover:text-red-700 border-red-200 dark:border-red-900/40"
-                                  >
-                                    Reject
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="text-right text-[11px] text-ink-muted dark:text-ink-dark-muted">
-                                  <span>Reviewed by {app.reviewed_by || 'Admin'}</span>
-                                  {app.reviewed_at && (
-                                    <span className="block text-[10px] text-ink-faint">
-                                      {new Date(app.reviewed_at).toLocaleDateString()}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
+                (() => {
+                  const filtered = applications.filter(app => {
+                    if (appStatusFilter !== 'all' && app.status.toLowerCase() !== appStatusFilter.toLowerCase()) {
+                      return false;
+                    }
+                    if (appSearchQuery.trim()) {
+                      const q = appSearchQuery.toLowerCase();
+                      return (
+                        app.full_name.toLowerCase().includes(q) ||
+                        app.email.toLowerCase().includes(q) ||
+                        app.employee_id.toLowerCase().includes(q) ||
+                        app.club_name.toLowerCase().includes(q) ||
+                        app.position.toLowerCase().includes(q)
+                      );
+                    }
+                    return true;
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="py-16 text-center space-y-3">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <h4 className="font-display font-bold text-base text-ink dark:text-ink-dark">
+                          {appStatusFilter === 'pending'
+                            ? 'No Pending Requests Awaiting Approval'
+                            : `No Applications Match Status "${appStatusFilter.toUpperCase()}"`}
+                        </h4>
+                        <p className="text-xs text-ink-muted dark:text-ink-dark-muted max-w-sm mx-auto">
+                          {appStatusFilter === 'pending'
+                            ? 'All organizer applications have been reviewed by the Super Admin.'
+                            : 'Try selecting another status tab or clearing your search filter.'}
+                        </p>
+                        {appStatusFilter !== 'all' && (
+                          <Button variant="secondary" size="sm" onClick={() => setAppStatusFilter('all')}>
+                            View All Applications ({applications.length})
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-border dark:border-border-dark text-ink-faint dark:text-ink-dark-muted font-bold uppercase tracking-wider bg-surface-subtle/40 dark:bg-surface-dark-subtle/40">
+                            <th className="py-3.5 px-5">Applicant Name & Email</th>
+                            <th className="py-3.5 px-4">Employee / Reg ID</th>
+                            <th className="py-3.5 px-4">Club / Department & Position</th>
+                            <th className="py-3.5 px-4 max-w-xs">Reason for Access</th>
+                            <th className="py-3.5 px-4">Submission Date</th>
+                            <th className="py-3.5 px-4">Current Status</th>
+                            <th className="py-3.5 px-5 text-right">Super Admin Action</th>
                           </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody className="divide-y divide-border/60 dark:divide-border-dark/60">
+                          {filtered.map(app => (
+                            <tr key={app.id} className="hover:bg-surface-subtle/80 dark:hover:bg-surface-dark-subtle/50 transition-colors">
+                              <td className="py-3.5 px-5">
+                                <span className="font-semibold text-ink dark:text-ink-dark block">{app.full_name}</span>
+                                <span className="text-ink-muted dark:text-ink-dark-muted font-mono text-[11px]">{app.email}</span>
+                              </td>
+                              <td className="py-3.5 px-4 font-mono font-medium text-ink dark:text-ink-dark">
+                                {app.employee_id}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className="font-semibold text-brand-600 dark:text-brand-400 block">{app.club_name}</span>
+                                <span className="text-ink-muted dark:text-ink-dark-muted text-[11px]">{app.position}</span>
+                              </td>
+                              <td className="py-3.5 px-4 max-w-xs">
+                                <p className="text-ink dark:text-ink-dark text-[11px] line-clamp-2 italic" title={app.reason}>
+                                  "{app.reason}"
+                                </p>
+                              </td>
+                              <td className="py-3.5 px-4 text-ink-muted dark:text-ink-dark-muted text-[11px] whitespace-nowrap">
+                                {new Date(app.submitted_at).toLocaleDateString(undefined, {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {app.status.toLowerCase() === 'pending' ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-bold">
+                                    <Clock className="w-3 h-3 animate-spin" />
+                                    PENDING
+                                  </span>
+                                ) : app.status.toLowerCase() === 'approved' ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    APPROVED
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-[11px] font-bold">
+                                    <XCircle className="w-3 h-3" />
+                                    REJECTED
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                                {app.status.toLowerCase() === 'pending' ? (
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      icon={<UserCheck className="w-3.5 h-3.5" />}
+                                      onClick={() => setApprovingApp(app)}
+                                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                    >
+                                      Approve Organizer
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      icon={<UserX className="w-3.5 h-3.5" />}
+                                      onClick={() => {
+                                        setRejectingApp(app);
+                                        setRejectionReasonInput('');
+                                      }}
+                                      className="text-red-600 hover:text-red-700 border-red-200 dark:border-red-900/40"
+                                    >
+                                      Reject Application
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="text-right text-[11px] text-ink-muted dark:text-ink-dark-muted">
+                                    <span>Reviewed by {app.reviewed_by || 'SRMIST Super Admin'}</span>
+                                    {app.reviewed_at && (
+                                      <span className="block text-[10px] text-ink-faint">
+                                        {new Date(app.reviewed_at).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()
               )}
             </div>
           </div>
@@ -1713,6 +1876,76 @@ export const AdminPage: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL 4B: APPROVE ORGANIZER APPLICATION CONFIRMATION */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={!!approvingApp}
+        onClose={() => setApprovingApp(null)}
+        title="Approve Organizer Application"
+        description="Confirm organizer approval and grant event publishing access."
+        maxWidth="md"
+      >
+        {approvingApp && (
+          <div className="space-y-4">
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Grant Organizer Privileges?</p>
+                <p className="mt-1 text-emerald-800 dark:text-emerald-300">
+                  Approving will elevate <strong>{approvingApp.full_name}</strong> to the Organizer role, enabling them to create, publish, and manage campus events for <strong>{approvingApp.club_name}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-canvas dark:bg-canvas-dark rounded-2xl border border-border dark:border-border-dark space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-ink-muted dark:text-ink-dark-muted">Applicant Name:</span>
+                <span className="font-bold text-ink dark:text-ink-dark">{approvingApp.full_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-muted dark:text-ink-dark-muted">Email:</span>
+                <span className="font-mono text-ink dark:text-ink-dark">{approvingApp.email}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-muted dark:text-ink-dark-muted">Registration / Employee ID:</span>
+                <span className="font-mono font-medium text-ink dark:text-ink-dark">{approvingApp.employee_id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-muted dark:text-ink-dark-muted">Club / Department:</span>
+                <span className="font-bold text-brand-600 dark:text-brand-400">{approvingApp.club_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-muted dark:text-ink-dark-muted">Position:</span>
+                <span className="text-ink dark:text-ink-dark">{approvingApp.position}</span>
+              </div>
+              <div className="pt-1.5 border-t border-border/60 dark:border-border-dark/60">
+                <span className="text-ink-muted dark:text-ink-dark-muted block mb-0.5">Reason for Request:</span>
+                <p className="italic text-ink dark:text-ink-dark bg-surface-subtle/50 dark:bg-surface-dark-subtle/50 p-2 rounded-lg">
+                  "{approvingApp.reason}"
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border dark:border-border-dark">
+              <Button variant="secondary" size="sm" type="button" onClick={() => setApprovingApp(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleConfirmApprove}
+                loading={submittingApproval}
+                icon={<CheckCircle2 className="w-4 h-4" />}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                Confirm Approval & Grant Access
+              </Button>
+            </div>
           </div>
         )}
       </Modal>

@@ -1,8 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { env } from '../config/env.js';
 import { EventItem, RegistrationItem, UserProfile, EventCategory, EventStatus, NotificationItem, UserRole, EventType, ApprovedOrganization, OrganizerOverview, OrganizerApplication, OrganizerApprovalStatus } from '../types/index.js';
 import { APPROVED_ORGANIZATIONS } from '../config/organizations.js';
+
 
 // ----------------------------------------------------------------------------
 // CRYPTOGRAPHIC CREDENTIALS & SESSION TOKEN SECURITY
@@ -198,8 +201,37 @@ const INITIAL_PROFILES: UserProfile[] = [
     avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
     created_at: new Date(Date.now() - 12 * 3600000).toISOString(),
     updated_at: new Date().toISOString(),
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000020',
+    full_name: 'Dr. K. S. Ramanathan',
+    email: 'ramanathan.ks@srmist.edu.in',
+    role: 'student',
+    registration_number: 'EMP-CSE-4821',
+    section: 'SRM Developer Student Club',
+    approval_status: 'pending',
+    club_name: 'SRM Developer Student Club',
+    position: 'Faculty Advisor & Convenor',
+    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80',
+    created_at: new Date(Date.now() - 4 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 4 * 3600000).toISOString(),
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000021',
+    full_name: 'Tanvi Deshmukh',
+    email: 'tanvi.d@student.srmist.edu.in',
+    role: 'student',
+    registration_number: 'RA2211003010777',
+    section: 'SRM Women in Tech (WIT)',
+    approval_status: 'pending',
+    club_name: 'SRM Women in Tech (WIT)',
+    position: 'Chapter President',
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+    created_at: new Date(Date.now() - 14 * 3600000).toISOString(),
+    updated_at: new Date(Date.now() - 14 * 3600000).toISOString(),
   }
 ];
+
 
 // Seed 10 realistic campus events with valid future dates
 const nowMs = Date.now();
@@ -450,6 +482,39 @@ const INITIAL_REGISTRATIONS: RegistrationItem[] = [
   }
 ];
 
+// Seed initial organizer applications awaiting Super Admin approval
+const INITIAL_APPLICATIONS: OrganizerApplication[] = [
+  {
+    id: '30000000-0000-0000-0000-000000000001',
+    user_id: '00000000-0000-0000-0000-000000000020',
+    full_name: 'Dr. K. S. Ramanathan',
+    email: 'ramanathan.ks@srmist.edu.in',
+    employee_id: 'EMP-CSE-4821',
+    club_name: 'SRM Developer Student Club',
+    position: 'Faculty Advisor & Convenor',
+    reason: 'Faculty coordinator requesting organizer dashboard access to conduct university coding hackathons, mentor student projects, and publish approved tech seminars.',
+    status: 'pending',
+    submitted_at: new Date(Date.now() - 4 * 3600000).toISOString(),
+  },
+  {
+    id: '30000000-0000-0000-0000-000000000002',
+    user_id: '00000000-0000-0000-0000-000000000021',
+    full_name: 'Tanvi Deshmukh',
+    email: 'tanvi.d@student.srmist.edu.in',
+    employee_id: 'RA2211003010777',
+    club_name: 'SRM Women in Tech (WIT)',
+    position: 'Chapter President',
+    reason: 'Student chapter president requesting organizer privileges to organize the Annual Women In Tech Summit 2026, tech workshops, and student networking mixers.',
+    status: 'pending',
+    submitted_at: new Date(Date.now() - 14 * 3600000).toISOString(),
+  }
+];
+
+// Disk cache directory for persistent storage across serverless warm/cold runs
+const CACHE_DIR = process.env.VERCEL ? '/tmp' : path.resolve(process.cwd(), '.cache-1kampus');
+const APPS_CACHE_FILE = path.join(CACHE_DIR, 'organizer_applications_cache.json');
+const PROFILES_CACHE_FILE = path.join(CACHE_DIR, 'profiles_cache.json');
+
 class DatabaseStore {
   private profiles: Map<string, UserProfile> = new Map();
   private events: Map<string, EventItem> = new Map();
@@ -466,6 +531,12 @@ class DatabaseStore {
     INITIAL_PROFILES.forEach(p => this.profiles.set(p.id, { ...p }));
     INITIAL_EVENTS.forEach(e => this.events.set(e.id, { ...e }));
     INITIAL_REGISTRATIONS.forEach(r => this.registrations.set(r.id, { ...r }));
+    INITIAL_APPLICATIONS.forEach(a => this.applications.set(a.id, { ...a }));
+
+    // Restore cached applications and profiles from disk if available (skip in test runner for hermetic test isolation)
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+      this.loadDiskCache();
+    }
 
     // Seed secure hashed credentials for designated accounts
     const initialAdminPass = process.env.SUPER_ADMIN_PASSWORD || 'Admin@1Kampus2026!';
@@ -474,6 +545,8 @@ class DatabaseStore {
     this.setCredentials('robotics@srmist.edu.in', 'Organizer@1Kampus2026!');
     this.setCredentials('ecell@srmist.edu.in', 'Organizer@1Kampus2026!');
     this.setCredentials('milan@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('ramanathan.ks@srmist.edu.in', 'Organizer@1Kampus2026!');
+    this.setCredentials('tanvi.d@student.srmist.edu.in', 'Organizer@1Kampus2026!');
     this.setCredentials('alex.chen@student.srmist.edu.in', 'Student@1Kampus2026!');
     this.setCredentials('priya.s@student.srmist.edu.in', 'Student@1Kampus2026!');
 
@@ -491,6 +564,7 @@ class DatabaseStore {
 
     // Ensure designated initial Super Admin account integrity
     this.ensureDesignatedSuperAdmin().then(res => {
+
       console.log(`[DatabaseStore] Super Admin verified: ${res.superAdmin.full_name} (${res.superAdmin.email})`);
       if (res.conflicts.length > 0) {
         console.warn(`[DatabaseStore] Warning: ${res.conflicts.length} other administrator account(s) detected:`, res.conflicts);
@@ -504,7 +578,53 @@ class DatabaseStore {
     return this.supabase !== null;
   }
 
+  public loadDiskCache(): void {
+    try {
+      if (fs.existsSync(APPS_CACHE_FILE)) {
+        const raw = fs.readFileSync(APPS_CACHE_FILE, 'utf-8');
+        const list = JSON.parse(raw) as OrganizerApplication[];
+        if (Array.isArray(list)) {
+          list.forEach(a => this.applications.set(a.id, a));
+          console.log(`[DatabaseStore] Restored ${list.length} organizer application(s) from persistent disk cache.`);
+        }
+      }
+      if (fs.existsSync(PROFILES_CACHE_FILE)) {
+        const raw = fs.readFileSync(PROFILES_CACHE_FILE, 'utf-8');
+        const list = JSON.parse(raw) as UserProfile[];
+        if (Array.isArray(list)) {
+          list.forEach(p => {
+            if (!this.profiles.has(p.id)) {
+              this.profiles.set(p.id, p);
+            }
+          });
+          console.log(`[DatabaseStore] Restored ${list.length} user profile(s) from persistent disk cache.`);
+        }
+      }
+    } catch (err) {
+      console.warn('[DatabaseStore] Could not read disk cache (non-critical):', err);
+    }
+  }
+
+  public saveDiskCache(): void {
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      return;
+    }
+    try {
+      if (!fs.existsSync(CACHE_DIR)) {
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+      }
+      const apps = Array.from(this.applications.values());
+      fs.writeFileSync(APPS_CACHE_FILE, JSON.stringify(apps, null, 2), 'utf-8');
+
+      const profiles = Array.from(this.profiles.values());
+      fs.writeFileSync(PROFILES_CACHE_FILE, JSON.stringify(profiles, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('[DatabaseStore] Could not save disk cache (non-critical):', err);
+    }
+  }
+
   // --------------------------------------------------------------------------
+
   // AUTHENTICATION & CREDENTIALS MANAGEMENT
   // --------------------------------------------------------------------------
   public setCredentials(email: string, password: string, mustChangePassword = false): void {
@@ -2068,6 +2188,7 @@ class DatabaseStore {
     };
 
     this.applications.set(appId, application);
+    this.saveDiskCache();
 
     // Notify Super Admin (admin@srmist.edu.in)
     const adminUser = Array.from(this.profiles.values()).find(p => p.role === 'admin' && p.email.toLowerCase() === 'admin@srmist.edu.in');
@@ -2121,8 +2242,8 @@ class DatabaseStore {
     if (this.supabase) {
       try {
         let query = this.supabase.from('organizer_applications').select('*').order('submitted_at', { ascending: false });
-        if (statusFilter && statusFilter !== 'all') {
-          query = query.eq('status', statusFilter);
+        if (statusFilter && statusFilter.toLowerCase() !== 'all') {
+          query = query.ilike('status', statusFilter.toLowerCase());
         }
         const { data, error } = await query;
         if (!error && data) {
@@ -2135,11 +2256,12 @@ class DatabaseStore {
     }
 
     const apps = Array.from(this.applications.values());
-    const filtered = (statusFilter && statusFilter !== 'all')
-      ? apps.filter(a => a.status === statusFilter)
+    const filtered = (statusFilter && statusFilter.toLowerCase() !== 'all')
+      ? apps.filter(a => a.status.toLowerCase() === statusFilter.toLowerCase())
       : apps;
     return filtered.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
   }
+
 
   public async getOrganizerApplicationById(id: string): Promise<OrganizerApplication | null> {
     const local = this.applications.get(id);
@@ -2195,7 +2317,10 @@ class DatabaseStore {
       throw new Error('FORBIDDEN_SUPER_ADMIN_REQUIRED: Only the designated Super Admin (admin@srmist.edu.in) can approve organizer applications.');
     }
 
-    const app = this.applications.get(applicationId);
+    let app = this.applications.get(applicationId);
+    if (!app) {
+      app = (await this.getOrganizerApplicationById(applicationId)) || undefined;
+    }
     if (!app) {
       throw new Error('APPLICATION_NOT_FOUND: The organizer application does not exist.');
     }
@@ -2221,6 +2346,7 @@ class DatabaseStore {
     user.position = app.position;
     user.updated_at = nowIso;
     this.profiles.set(user.id, user);
+    this.saveDiskCache();
 
     // Notify applicant
     await this.addNotification({
@@ -2263,7 +2389,10 @@ class DatabaseStore {
       throw new Error('FORBIDDEN_SUPER_ADMIN_REQUIRED: Only the designated Super Admin (admin@srmist.edu.in) can reject organizer applications.');
     }
 
-    const app = this.applications.get(applicationId);
+    let app = this.applications.get(applicationId);
+    if (!app) {
+      app = (await this.getOrganizerApplicationById(applicationId)) || undefined;
+    }
     if (!app) {
       throw new Error('APPLICATION_NOT_FOUND: The organizer application does not exist.');
     }
@@ -2288,6 +2417,7 @@ class DatabaseStore {
     user.approval_status = 'rejected';
     user.updated_at = nowIso;
     this.profiles.set(user.id, user);
+    this.saveDiskCache();
 
     // Notify applicant
     await this.addNotification({
@@ -2343,6 +2473,7 @@ class DatabaseStore {
     user.approval_status = 'suspended';
     user.updated_at = nowIso;
     this.profiles.set(userId, user);
+    this.saveDiskCache();
 
     await this.addNotification({
       user_id: user.id,

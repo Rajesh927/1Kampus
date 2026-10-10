@@ -29,12 +29,16 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
       if (token.startsWith('CC_SESSION_')) {
         const session = db.verifySessionToken(token);
         if (session) {
-          const profile = await db.getProfileById(session.userId);
+          let profile = await db.getProfileById(session.userId);
+          if (!profile && session.email) {
+            profile = await db.getProfileByEmail(session.email);
+          }
           if (profile) {
             req.user = profile;
             return next();
           }
         }
+
       }
 
       // B. Demo Session Token (for local vitest tests & non-production reviews)
