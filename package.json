@@ -1,0 +1,36 @@
+{
+  "name": "campusconnect-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "1Kampus - Full-Stack Campus Event Management Platform (Your Campus. One Place.)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n \"api,web\" -c \"cyan,magenta\" \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "build": "npm run build --workspaces --if-present",
+    "build:web": "npm run build --workspace=apps/web",
+    "build:api": "npm run build --workspace=apps/api",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "provision:admin": "npm --workspace=@campusconnect/api run provision:admin"
+  },
+  "keywords": [
+    "campus-events",
+    "srmist",
+    "acm",
+    "full-stack",
+    "react",
+    "express",
+    "supabase",
+    "typescript"
+  ],
+  "author": "Rajesh Choudhari",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
