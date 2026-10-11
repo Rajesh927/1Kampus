@@ -18,10 +18,9 @@ import {
   Sun,
   Moon,
 } from 'lucide-react';
-import { UserRole } from '../../types/index.js';
 
 export const Navbar: React.FC = () => {
-  const { user, loginWithRole, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
   const { toggleTheme, isDark } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -52,11 +51,6 @@ export const Navbar: React.FC = () => {
     } else {
       navigate('/signup');
     }
-  };
-
-  const handleRoleChange = async (role: UserRole) => {
-    setRoleDropdownOpen(false);
-    await loginWithRole(role, role === 'admin' ? 'admin@srmist.edu.in' : undefined);
   };
 
   const isActive = (path: string) => location.pathname === path;
@@ -116,49 +110,52 @@ export const Navbar: React.FC = () => {
             How It Works
           </a>
 
-          {/* Quick Demo Role Switcher for Assessment Reviewers */}
+          {/* Institutional Campus Portals Dropdown */}
           <div className="relative ml-2">
             <button
               onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-brand-200 dark:border-brand-800/60 bg-brand-50 dark:bg-brand-900/40 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/70 transition-colors cursor-pointer"
-              title="Switch demo persona for instant role preview"
+              title="Campus Portals"
             >
               <Sparkles className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-              <span>Role: {user?.role ? user.role.toUpperCase() : 'DEMO'}</span>
+              <span>{user ? `Role: ${user.role.toUpperCase()}` : 'Portals'}</span>
               <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
             </button>
 
             {roleDropdownOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-surface dark:bg-surface-dark rounded-2xl shadow-modal border border-border dark:border-border-dark py-2 z-50 animate-slide-up">
                 <div className="px-3 py-1.5 text-[11px] font-bold text-ink-faint dark:text-ink-dark-faint uppercase tracking-wider border-b border-border/60 dark:border-border-dark/60">
-                  Switch Review Persona
+                  Institutional Portals
                 </div>
                 <button
-                  onClick={() => handleRoleChange('student')}
-                  className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted ${
-                    user?.role === 'student' ? 'font-bold text-brand-600 dark:text-brand-400' : 'text-ink dark:text-ink-dark'
-                  }`}
+                  onClick={() => {
+                    setRoleDropdownOpen(false);
+                    navigate('/login');
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted text-ink dark:text-ink-dark cursor-pointer"
                 >
-                  <span>Student (Alex Chen)</span>
-                  {user?.role === 'student' && <span className="w-2 h-2 rounded-full bg-brand-600" />}
+                  <span>Student Portal</span>
+                  <span className="text-[10px] text-ink-muted">Sign In</span>
                 </button>
                 <button
-                  onClick={() => handleRoleChange('organizer')}
-                  className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted ${
-                    user?.role === 'organizer' ? 'font-bold text-brand-600 dark:text-brand-400' : 'text-ink dark:text-ink-dark'
-                  }`}
+                  onClick={() => {
+                    setRoleDropdownOpen(false);
+                    navigate('/organizer/login');
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted text-ink dark:text-ink-dark cursor-pointer"
                 >
-                  <span>Organizer (ACM Chapter)</span>
-                  {user?.role === 'organizer' && <span className="w-2 h-2 rounded-full bg-brand-600" />}
+                  <span>Organizer Portal</span>
+                  <span className="text-[10px] text-indigo-600 font-semibold">Club Lead</span>
                 </button>
                 <button
-                  onClick={() => handleRoleChange('admin')}
-                  className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted ${
-                    user?.role === 'admin' ? 'font-bold text-brand-600 dark:text-brand-400' : 'text-ink dark:text-ink-dark'
-                  }`}
+                  onClick={() => {
+                    setRoleDropdownOpen(false);
+                    navigate('/admin/login');
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs flex items-center justify-between hover:bg-surface-subtle dark:hover:bg-surface-dark-muted text-ink dark:text-ink-dark cursor-pointer"
                 >
-                  <span>SRMIST (Super Admin)</span>
-                  {user?.role === 'admin' && <span className="w-2 h-2 rounded-full bg-brand-600" />}
+                  <span>Super Admin Console</span>
+                  <span className="text-[10px] text-emerald-600 font-bold">SRMIST</span>
                 </button>
               </div>
             )}
@@ -338,27 +335,27 @@ export const Navbar: React.FC = () => {
             </div>
           )}
 
-          {/* Quick Demo Selector for Mobile */}
+          {/* Institutional Campus Portals for Mobile */}
           <div className="pt-3 border-t border-border dark:border-border-dark">
             <span className="text-xs font-semibold text-ink-muted dark:text-ink-dark-muted uppercase block mb-2 px-1">
-              Switch Review Persona
+              Institutional Portals
             </span>
             <div className="grid grid-cols-3 gap-1.5">
               <button
-                onClick={() => { handleRoleChange('student'); setMobileMenuOpen(false); }}
-                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center"
+                onClick={() => { navigate('/login'); setMobileMenuOpen(false); }}
+                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center cursor-pointer"
               >
                 Student
               </button>
               <button
-                onClick={() => { handleRoleChange('organizer'); setMobileMenuOpen(false); }}
-                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center"
+                onClick={() => { navigate('/organizer/login'); setMobileMenuOpen(false); }}
+                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center cursor-pointer"
               >
                 Organizer
               </button>
               <button
-                onClick={() => { handleRoleChange('admin'); setMobileMenuOpen(false); }}
-                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center"
+                onClick={() => { navigate('/admin/login'); setMobileMenuOpen(false); }}
+                className="px-2 py-1.5 text-xs rounded-lg border border-border dark:border-border-dark bg-surface-subtle dark:bg-surface-dark-muted text-ink dark:text-ink-dark font-medium text-center cursor-pointer"
               >
                 Super Admin
               </button>

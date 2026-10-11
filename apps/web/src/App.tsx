@@ -15,6 +15,7 @@ import { OrganizerPage } from './pages/OrganizerPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AuthPage } from './pages/AuthPage.js';
 import { OrganizerAuthPage } from './pages/OrganizerAuthPage.js';
+import { AdminLoginPage } from './pages/AdminLoginPage.js';
 
 import { useAuth } from './context/AuthContext.js';
 
@@ -88,6 +89,7 @@ export const App: React.FC = () => {
                   <Route path="/organizer/login" element={<OrganizerAuthPage initialMode="login" />} />
                   <Route path="/organizer/register" element={<OrganizerAuthPage initialMode="register" />} />
                   <Route path="/organizer/apply" element={<Navigate to="/organizer/register" replace />} />
+                  <Route path="/admin/login" element={<AdminLoginPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>

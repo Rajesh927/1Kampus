@@ -22,6 +22,6 @@ export const env = {
   SMTP_PASS: process.env.SMTP_PASS || '',
   EMAIL_FROM: process.env.EMAIL_FROM || 'notifications@1kampus.local',
 
-  isProduction: process.env.NODE_ENV === 'production',
-  isDevelopment: process.env.NODE_ENV !== 'production',
+  isProduction: process.env.NODE_ENV === 'production' || !!process.env.VERCEL,
+  isDevelopment: process.env.NODE_ENV !== 'production' && !process.env.VERCEL,
 };

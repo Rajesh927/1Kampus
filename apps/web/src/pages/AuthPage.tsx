@@ -18,7 +18,6 @@ import {
   Hash,
   School,
 } from 'lucide-react';
-import { UserRole } from '../types/index.js';
 
 // Approved Campus Academic Sections
 const APPROVED_SECTIONS = [
@@ -67,24 +66,9 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
 
   const [submitting, setSubmitting] = useState(false);
 
-  const { loginWithRole, loginWithSupabase, signupStudent, requestPasswordReset } = useAuth();
+  const { loginWithSupabase, signupStudent, requestPasswordReset } = useAuth();
   const { success, error, info } = useToast();
   const navigate = useNavigate();
-
-  const handleDemoLogin = async (role: UserRole, demoEmail?: string) => {
-    setSubmitting(true);
-    try {
-      await loginWithRole(role, demoEmail);
-      success(`Signed in as ${role.toUpperCase()}`, 'Welcome to 1Kampus!');
-      if (role === 'organizer') navigate('/organizer');
-      else if (role === 'admin') navigate('/admin');
-      else navigate('/events');
-    } catch (err: any) {
-      error('Sign in failed', err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   // Check Email uniqueness on blur
   const handleEmailBlur = async () => {
@@ -268,20 +252,29 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0 space-y-6">
-        {/* Instant Demo Personas for Evaluators / Recruiters */}
+        {/* Institutional Assessment Personas */}
         <div className="bg-surface dark:bg-surface-dark border border-brand-200 dark:border-brand-900/80 rounded-3xl p-5 sm:p-6 shadow-card dark:shadow-card-dark space-y-3.5">
           <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/80 border border-brand-200 dark:border-brand-800/60 text-brand-700 dark:text-brand-300 font-bold text-xs uppercase tracking-wider">
             <Sparkles className="w-4 h-4 text-brand-600 dark:text-brand-400" />
             <span>1-Click Assessment Personas</span>
           </div>
           <p className="text-xs text-ink-muted dark:text-slate-300 leading-relaxed">
-            Click any persona below to preview full role features immediately without typing credentials:
+            Select a verified campus persona below to access its official role authentication portal:
           </p>
 
           <div className="space-y-2.5 pt-1">
+            {/* 1. Student Persona: Opens Student Login Page */}
             <button
-              onClick={() => handleDemoLogin('student', 'alex.chen@student.srmist.edu.in')}
-              disabled={submitting}
+              type="button"
+              id="persona-student-button"
+              onClick={() => {
+                setMode('login');
+                setEmail('alex.chen@student.srmist.edu.in');
+                setPassword('');
+                setTimeout(() => {
+                  document.getElementById('auth-password-input')?.focus();
+                }, 50);
+              }}
               className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-brand-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
             >
               <div className="flex items-center gap-3">
@@ -290,15 +283,19 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
                 </div>
                 <div>
                   <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">Alex Chen (Student)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Reg: RA2311003010123 • Sec: CSE-A</span>
+                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Student Login • Reg: RA2311003010123 • Sec: CSE-A</span>
                 </div>
               </div>
               <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
             </button>
 
+            {/* 2. Organizer Persona: Opens Dedicated Organizer Login Page */}
             <button
-              onClick={() => handleDemoLogin('organizer', 'acm@srmist.edu.in')}
-              disabled={submitting}
+              type="button"
+              id="persona-organizer-button"
+              onClick={() => {
+                navigate('/organizer/login');
+              }}
               className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
             >
               <div className="flex items-center gap-3">
@@ -307,15 +304,19 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
                 </div>
                 <div>
                   <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">ACM SRMIST (Organizer)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Publish Events, Manage Roster & Attendance</span>
+                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Organizer Login • Dedicated portal for verified club leads</span>
                 </div>
               </div>
               <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
             </button>
 
+            {/* 3. Super Admin Persona: Opens Dedicated Admin Login Page */}
             <button
-              onClick={() => handleDemoLogin('admin', 'admin@srmist.edu.in')}
-              disabled={submitting}
+              type="button"
+              id="persona-admin-button"
+              onClick={() => {
+                navigate('/admin/login');
+              }}
               className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-emerald-400 dark:hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
             >
               <div className="flex items-center gap-3">
@@ -324,7 +325,7 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
                 </div>
                 <div>
                   <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">SRMIST (Super Admin)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Super Admin: Student, Organizer & Platform Governance</span>
+                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Super Admin Login • Dedicated institutional governance portal</span>
                 </div>
               </div>
               <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
@@ -518,18 +519,43 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
 
           {/* Toggle Login / Signup */}
           <div className="text-center pt-2 border-t border-border dark:border-border-dark space-y-2.5">
-            <button
-              onClick={() => {
-                setMode(mode === 'login' ? 'signup' : 'login');
-                setEmailError(null);
-                setRegError(null);
-              }}
-              className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 underline cursor-pointer block w-full text-center"
-            >
-              {mode === 'login'
-                ? "Don't have an account? Sign up with 5 required student fields"
-                : 'Already have an account? Sign in'}
-            </button>
+            {mode === 'login' ? (
+              <div className="space-y-1">
+                <p className="text-xs text-ink-muted dark:text-ink-dark-muted">
+                  New student to 1Kampus?
+                </p>
+                <button
+                  type="button"
+                  id="auth-switch-to-signup"
+                  onClick={() => {
+                    setMode('signup');
+                    setEmailError(null);
+                    setRegError(null);
+                  }}
+                  className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 underline cursor-pointer block w-full text-center"
+                >
+                  Create Student Account (Sign Up)
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-xs text-ink-muted dark:text-ink-dark-muted">
+                  Already registered?
+                </p>
+                <button
+                  type="button"
+                  id="auth-switch-to-login"
+                  onClick={() => {
+                    setMode('login');
+                    setEmailError(null);
+                    setRegError(null);
+                  }}
+                  className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 underline cursor-pointer block w-full text-center"
+                >
+                  Sign In to Student Account
+                </button>
+              </div>
+            )}
 
             {/* Dedicated Organizer Link */}
             <div className="pt-1 border-t border-border/40 dark:border-border-dark/40">
