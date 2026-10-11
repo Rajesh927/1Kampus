@@ -158,7 +158,7 @@ export const OrganizerApplicationSchema = z.object({
   position: z.string().trim().min(2, 'Position in the club or department is required').max(60),
   password: z.string().min(6, 'Password must be at least 6 characters').max(128),
   confirm_password: z.string().min(6, 'Confirm password must be at least 6 characters').max(128).optional(),
-  reason: z.string().trim().min(10, 'Reason must be at least 10 characters explaining why you need organizer access').max(1000),
+  reason: z.string().trim().min(3, 'Reason must be at least 3 characters explaining why you need organizer access').max(1000),
 }).refine(
   data => !data.confirm_password || data.password === data.confirm_password,
   {

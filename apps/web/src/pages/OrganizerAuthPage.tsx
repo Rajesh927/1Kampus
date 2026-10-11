@@ -138,8 +138,9 @@ export const OrganizerAuthPage: React.FC<OrganizerAuthPageProps> = ({ initialMod
       return;
     }
 
-    if (reason.trim().length < 10) {
-      error('Reason Required', 'Please provide a detailed reason of at least 10 characters.');
+    if (reason.trim().length < 3) {
+      error('Reason Required', 'Please provide a reason of at least 3 characters.');
+      document.getElementById('organizer-reason-textarea')?.focus();
       return;
     }
 
@@ -551,18 +552,63 @@ export const OrganizerAuthPage: React.FC<OrganizerAuthPageProps> = ({ initialMod
 
               {/* 7. Reason for requesting organizer access */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-ink-dark-muted mb-1 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-                  <span>Reason for Requesting Organizer Access *</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="organizer-reason-textarea" className="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-ink-dark-muted flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                    <span>Reason for Requesting Access *</span>
+                  </label>
+                  <span className={`text-[11px] font-bold ${
+                    reason.trim().length >= 3
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : reason.trim().length > 0
+                      ? 'text-amber-500'
+                      : 'text-slate-400'
+                  }`}>
+                    {reason.trim().length}/3 min chars
+                  </span>
+                </div>
                 <textarea
+                  id="organizer-reason-textarea"
                   required
                   rows={3}
                   value={reason}
                   onChange={e => setReason(e.target.value)}
-                  placeholder="Explain why your club/department requires access to host events, manage tickets, and track student attendees on 1Kampus..."
-                  className="w-full px-4 py-2.5 rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark-subtle text-sm text-ink dark:text-ink-dark focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                  placeholder="Explain why your club/department requires access to host events, manage tickets, and track attendees..."
+                  className={`w-full px-4 py-2.5 rounded-xl border ${
+                    reason.trim().length > 0 && reason.trim().length < 3
+                      ? 'border-amber-400 dark:border-amber-500 focus:ring-amber-500'
+                      : reason.trim().length >= 3
+                      ? 'border-emerald-400 dark:border-emerald-500/70 focus:ring-emerald-500'
+                      : 'border-border dark:border-border-dark focus:ring-brand-500'
+                  } bg-surface dark:bg-surface-dark-subtle text-sm text-ink dark:text-ink-dark focus:outline-none focus:ring-2 resize-none transition-colors`}
                 />
+                
+                {/* Real-time status / helper & Sample Autofill */}
+                <div className="mt-1.5 flex items-center justify-between text-xs flex-wrap gap-2">
+                  <div>
+                    {reason.trim().length > 0 && reason.trim().length < 3 ? (
+                      <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                        ⚠️ Need {3 - reason.trim().length} more character{3 - reason.trim().length === 1 ? '' : 's'} (min. 3 required)
+                      </span>
+                    ) : reason.trim().length >= 3 ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                        ✓ Reason accepted ({reason.trim().length} characters)
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                        Minimum 3 characters describing your club's intent.
+                      </span>
+                    )}
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setReason('Requesting organizer access to host official club events, manage student registrations, and issue digital QR tickets.')}
+                    className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer bg-brand-50 dark:bg-brand-950/60 px-2 py-0.5 rounded-md border border-brand-200 dark:border-brand-800/60"
+                  >
+                    + Fill sample reason
+                  </button>
+                </div>
               </div>
 
               <div className="p-3.5 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 text-xs text-ink-muted dark:text-ink-dark-muted flex items-start gap-2">

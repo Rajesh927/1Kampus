@@ -33,14 +33,23 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     type?: ToastType;
     duration?: number;
   }) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, title, message, type }]);
+    setToasts(prev => {
+      // Prevent duplicate toast spam if exact same title and message are already showing
+      if (prev.some(t => t.title === title && t.message === message)) {
+        return prev;
+      }
 
-    if (duration > 0) {
-      setTimeout(() => {
-        removeToast(id);
-      }, duration);
-    }
+      const id = Math.random().toString(36).substring(2, 9);
+      if (duration > 0) {
+        setTimeout(() => {
+          removeToast(id);
+        }, duration);
+      }
+
+      // Cap to at most 3 simultaneous toasts to prevent screen crowding
+      const updated = [...prev, { id, title, message, type }];
+      return updated.slice(-3);
+    });
   }, [removeToast]);
 
   const success = useCallback((title: string, message?: string) => toast({ title, message, type: 'success' }), [toast]);
