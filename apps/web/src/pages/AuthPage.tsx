@@ -253,16 +253,22 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0 space-y-6">
         {/* Institutional Assessment Personas */}
-        <div className="bg-surface dark:bg-surface-dark border border-brand-200 dark:border-brand-900/80 rounded-3xl p-5 sm:p-6 shadow-card dark:shadow-card-dark space-y-3.5">
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/80 border border-brand-200 dark:border-brand-800/60 text-brand-700 dark:text-brand-300 font-bold text-xs uppercase tracking-wider">
-            <Sparkles className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-            <span>1-Click Assessment Personas</span>
+        <div className="bg-surface dark:bg-[#131B2E] border-2 border-brand-200 dark:border-slate-700/80 rounded-3xl p-5 sm:p-6 shadow-card dark:shadow-card-dark space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/15 border border-brand-500/30 text-brand-700 dark:text-brand-300 font-extrabold text-xs uppercase tracking-wider shadow-xs">
+              <Sparkles className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>1-Click Assessment Personas</span>
+            </div>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Quick Portals
+            </span>
           </div>
-          <p className="text-xs text-ink-muted dark:text-slate-300 leading-relaxed">
+
+          <p className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200 leading-relaxed">
             Select a verified campus persona below to access its official role authentication portal:
           </p>
 
-          <div className="space-y-2.5 pt-1">
+          <div className="space-y-3 pt-1">
             {/* 1. Student Persona: Opens Student Login Page */}
             <button
               type="button"
@@ -275,18 +281,28 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
                   document.getElementById('auth-password-input')?.focus();
                 }, 50);
               }}
-              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-brand-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
+              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-[#182238] border-2 border-slate-200 dark:border-slate-700 hover:border-brand-500 dark:hover:border-brand-400 hover:bg-brand-50/40 dark:hover:bg-[#1E2B47] text-left transition-all shadow-sm hover:shadow-md group cursor-pointer"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-brand-100 dark:bg-brand-950/90 border border-brand-200/60 dark:border-brand-800/60 flex items-center justify-center text-brand-700 dark:text-brand-300 shrink-0">
-                  <User className="w-4.5 h-4.5" />
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 text-white flex items-center justify-center shadow-md shadow-brand-500/20 shrink-0">
+                  <User className="w-5 h-5" />
                 </div>
-                <div>
-                  <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">Alex Chen (Student)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Student Login • Reg: RA2311003010123 • Sec: CSE-A</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Alex Chen</span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-brand-100 dark:bg-brand-900/60 text-brand-700 dark:text-brand-300 border border-brand-200 dark:border-brand-700/60">
+                      Student
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-300 font-medium block mt-0.5 truncate">
+                    Student Login • Reg: RA2311003010123 • Sec: CSE-A
+                  </span>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
+              <div className="flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-300 group-hover:translate-x-1 transition-transform shrink-0 ml-2">
+                <span>Login</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
             </button>
 
             {/* 2. Organizer Persona: Opens Dedicated Organizer Login Page */}
@@ -296,18 +312,28 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
               onClick={() => {
                 navigate('/organizer/login');
               }}
-              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
+              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-[#182238] border-2 border-slate-200 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-indigo-50/40 dark:hover:bg-[#1E2B47] text-left transition-all shadow-sm hover:shadow-md group cursor-pointer"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950/90 border border-indigo-200/60 dark:border-indigo-800/60 flex items-center justify-center text-indigo-700 dark:text-indigo-300 shrink-0">
-                  <Calendar className="w-4.5 h-4.5" />
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+                  <Calendar className="w-5 h-5" />
                 </div>
-                <div>
-                  <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">ACM SRMIST (Organizer)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Organizer Login • Dedicated portal for verified club leads</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">ACM SRMIST</span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700/60">
+                      Organizer
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-300 font-medium block mt-0.5 truncate">
+                    Organizer Portal • Dedicated login for verified club leads
+                  </span>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
+              <div className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-300 group-hover:translate-x-1 transition-transform shrink-0 ml-2">
+                <span>Login</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
             </button>
 
             {/* 3. Super Admin Persona: Opens Dedicated Admin Login Page */}
@@ -317,18 +343,28 @@ export const AuthPage: React.FC<{ initialMode?: 'login' | 'signup' }> = ({ initi
               onClick={() => {
                 navigate('/admin/login');
               }}
-              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-surface-subtle dark:bg-[#182033] border border-border dark:border-slate-700/70 hover:border-emerald-400 dark:hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-[#1E2840] text-left transition-all shadow-xs group cursor-pointer"
+              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-white dark:bg-[#182238] border-2 border-slate-200 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-[#1E2B47] text-left transition-all shadow-sm hover:shadow-md group cursor-pointer"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/90 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-center text-emerald-800 dark:text-emerald-300 shrink-0">
-                  <ShieldCheck className="w-4.5 h-4.5" />
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
                 </div>
-                <div>
-                  <span className="text-xs sm:text-sm font-bold text-ink dark:text-white block">SRMIST (Super Admin)</span>
-                  <span className="text-[11px] text-ink-muted dark:text-slate-400 font-normal">Super Admin Login • Dedicated institutional governance portal</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">SRMIST</span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700/60">
+                      Super Admin
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-600 dark:text-slate-300 font-medium block mt-0.5 truncate">
+                    Super Admin Console • Governance & approvals
+                  </span>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-brand-500 dark:text-brand-400 transition-transform group-hover:translate-x-1 shrink-0" />
+              <div className="flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-300 group-hover:translate-x-1 transition-transform shrink-0 ml-2">
+                <span>Login</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
             </button>
           </div>
         </div>
