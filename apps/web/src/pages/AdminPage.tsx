@@ -48,7 +48,7 @@ export const AdminPage: React.FC = () => {
   const [pendingApplicationsCount, setPendingApplicationsCount] = useState<number>(0);
   const [loadingApplications, setLoadingApplications] = useState<boolean>(false);
   const [applicationsError, setApplicationsError] = useState<string | null>(null);
-  const [appStatusFilter, setAppStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [appStatusFilter, setAppStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [appSearchQuery, setAppSearchQuery] = useState('');
   const [approvingApp, setApprovingApp] = useState<OrganizerApplication | null>(null);
   const [submittingApproval, setSubmittingApproval] = useState(false);
@@ -215,13 +215,32 @@ export const AdminPage: React.FC = () => {
 
   const handleConfirmApprove = async () => {
     if (!approvingApp) return;
+    const targetId = approvingApp.id;
+    const applicantName = approvingApp.full_name;
+    const clubName = approvingApp.club_name;
     setSubmittingApproval(true);
     try {
-      const res = await api.approveOrganizerApplication(approvingApp.id);
+      const res = await api.approveOrganizerApplication(targetId);
       if (res.success) {
-        success('Organizer Approved', `Organizer privileges granted to ${approvingApp.full_name} (${approvingApp.club_name}).`);
+        success('Organizer Approved', `Organizer privileges granted to ${applicantName} (${clubName}).`);
         setApprovingApp(null);
-        await Promise.all([loadApplications(), loadAdminData()]);
+        // Ensure pending filter is active so confirmed organizer is immediately removed from the pending review list
+        setAppStatusFilter('pending');
+        // Optimistically update applications state: mark as approved so it drops out of the pending list immediately
+        setApplications(prev =>
+          prev.map(a =>
+            a.id === targetId
+              ? {
+                  ...a,
+                  status: 'approved',
+                  reviewed_at: new Date().toISOString(),
+                  reviewed_by: user?.email || 'admin@srmist.edu.in',
+                }
+              : a
+          )
+        );
+        setPendingApplicationsCount(prev => Math.max(0, prev - 1));
+        await Promise.all([loadApplications(), loadAdminData(), loadStudentData()]);
       } else {
         throw new Error(res.error?.message || 'Approval was rejected by server.');
       }
@@ -235,14 +254,32 @@ export const AdminPage: React.FC = () => {
   const handleConfirmReject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectingApp) return;
+    const targetId = rejectingApp.id;
+    const applicantName = rejectingApp.full_name;
+    const reason = rejectionReasonInput.trim();
     setSubmittingRejection(true);
     try {
-      const res = await api.rejectOrganizerApplication(rejectingApp.id, rejectionReasonInput.trim());
+      const res = await api.rejectOrganizerApplication(targetId, reason);
       if (res.success) {
-        success('Application Rejected', `Organizer application for ${rejectingApp.full_name} was rejected.`);
+        success('Application Rejected', `Organizer application for ${applicantName} was rejected.`);
         setRejectingApp(null);
         setRejectionReasonInput('');
-        await Promise.all([loadApplications(), loadAdminData()]);
+        setAppStatusFilter('pending');
+        setApplications(prev =>
+          prev.map(a =>
+            a.id === targetId
+              ? {
+                  ...a,
+                  status: 'rejected',
+                  reviewed_at: new Date().toISOString(),
+                  reviewed_by: user?.email || 'admin@srmist.edu.in',
+                  rejection_reason: reason,
+                }
+              : a
+          )
+        );
+        setPendingApplicationsCount(prev => Math.max(0, prev - 1));
+        await Promise.all([loadApplications(), loadAdminData(), loadStudentData()]);
       } else {
         throw new Error(res.error?.message || 'Rejection was rejected by server.');
       }
@@ -806,22 +843,31 @@ export const AdminPage: React.FC = () => {
                   if (filtered.length === 0) {
                     return (
                       <div className="py-16 text-center space-y-3">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                           <CheckCircle2 className="w-6 h-6" />
                         </div>
                         <h4 className="font-display font-bold text-base text-ink dark:text-ink-dark">
                           {appStatusFilter === 'pending'
-                            ? 'No Pending Requests Awaiting Approval'
+                            ? 'All Pending Requests Reviewed!'
                             : `No Applications Match Status "${appStatusFilter.toUpperCase()}"`}
                         </h4>
                         <p className="text-xs text-ink-muted dark:text-ink-dark-muted max-w-sm mx-auto">
                           {appStatusFilter === 'pending'
-                            ? 'All organizer applications have been reviewed by the Super Admin.'
+                            ? 'All organizer applications have been reviewed. Confirmed organizers have been granted event publishing access.'
                             : 'Try selecting another status tab or clearing your search filter.'}
                         </p>
-                        {appStatusFilter !== 'all' && (
-                          <Button variant="secondary" size="sm" onClick={() => setAppStatusFilter('all')}>
-                            View All Applications ({applications.length})
+                        {appStatusFilter === 'pending' ? (
+                          <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                            <Button variant="secondary" size="sm" onClick={() => setAppStatusFilter('approved')}>
+                              View Approved Organizers ({applications.filter(a => a.status.toLowerCase() === 'approved').length})
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => setActiveTab('organizers')}>
+                              Campus Clubs & Organizers Directory
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => setAppStatusFilter('pending')}>
+                            Back to Pending Requests ({pendingApplicationsCount})
                           </Button>
                         )}
                       </div>
